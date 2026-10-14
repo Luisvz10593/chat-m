@@ -7,7 +7,7 @@
   --muted: #9a9aab;
   --twitch: #9146ff;
   --kick: #53fc18;
-  --starvios: #ffc83d;
+  --starvios: #ff4fa3;
   --danger: #ff4d5e;
   --mention: rgba(255, 196, 0, .14);
   --fs: 19px;
@@ -24,6 +24,15 @@ body {
   flex-direction: column;
   overflow: hidden;
   -webkit-tap-highlight-color: transparent;
+  /* La interfaz no se puede seleccionar ni copiar; solo el texto de los mensajes */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.msg .body, .act-text, input, textarea {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
 }
 button { font: inherit; color: inherit; cursor: pointer; }
 input { font: inherit; }
@@ -139,6 +148,11 @@ body.show-channel .msg .chan { display: inline; }
 .target.twitch { background: var(--twitch); color: #fff; }
 .target.kick { background: var(--kick); color: #000; }
 .target.starvios { background: var(--starvios); color: #000; }
+.target.all {
+  background: linear-gradient(90deg, var(--twitch), var(--kick) 55%, var(--starvios));
+  color: #000;
+}
+.target option { background: var(--panel); color: var(--text); }
 .stack { display: flex; flex-direction: column; gap: 10px; }
 .stack[hidden] { display: none; }
 #input {

@@ -232,8 +232,12 @@ function addMessage(m) {
   if (myNames().some((n) => plain.includes('@' + n))) el.classList.add('mention');
 
   el.append(time, content);
-  el.addEventListener('click', () => openActions(m, el));
-  pushEl(el);
+  el.addEventListener('click', () => {
+    // Si el usuario está seleccionando texto para copiarlo, no abre las acciones
+    if (String(window.getSelection())) return;
+    openActions(m, el);
+  });
+  pushEl(el, (m.time || new Date()).getTime());
 }
 
 function addSystem(platform, text, highlight = false, channel = null) {
@@ -248,11 +252,17 @@ function addSystem(platform, text, highlight = false, channel = null) {
   if (channel) content.append(chanTag(channel));
   content.append(text);
   el.append(time, content);
-  pushEl(el);
+  pushEl(el, Date.now());
 }
 
-function pushEl(el) {
-  feed.append(el);
+// Inserta cada mensaje en su lugar según la hora en que se escribió, no según
+// cuándo llegó: así los chats de distintas plataformas quedan intercalados en orden.
+function pushEl(el, t) {
+  el._t = t;
+  let after = feed.lastElementChild;
+  while (after && after._t > t) after = after.previousElementSibling;
+  if (after) after.after(el);
+  else feed.prepend(el);
   while (feed.childElementCount > MAX_MESSAGES) feed.firstElementChild.remove();
   if (stickToBottom) feed.scrollTop = feed.scrollHeight;
   else $('#jump').hidden = false;
@@ -282,7 +292,7 @@ const BADGE_ALIASES = { owner: 'broadcaster', mod: 'moderator', sub: 'subscriber
 // Evita nombres ilegibles sobre fondo oscuro
 function readableColor(color, platform) {
   if (!color || !/^#[0-9a-f]{6}$/i.test(color)) {
-    return { kick: '#53fc18', starvios: '#ffc83d' }[platform] || '#bf94ff';
+    return { kick: '#53fc18', starvios: '#ff7cbc' }[platform] || '#bf94ff';
   }
   const n = parseInt(color.slice(1), 16);
   const r = n >> 16, g = (n >> 8) & 255, b = n & 255;
@@ -1185,13 +1195,33 @@ function clearReply() {
 /* =========================================================
    Escribir mensajes
    ========================================================= */
+const ALL_TARGETS = '*';
+
+// Envía el mismo mensaje a todos los canales con sesión; avisa cuáles fallaron
+async function sendToAll(text) {
+  const targets = sources().filter((s) => PROVIDERS[s.p].logged());
+  const results = await Promise.allSettled(targets.map((s) => PROVIDERS[s.p].send(s.ch, text, null)));
+  const failed = targets.filter((_, i) => results[i].status === 'rejected');
+  if (!failed.length) {
+    toast(`Enviado a ${targets.length} canales.`);
+  } else if (failed.length === targets.length) {
+    throw new Error('No se pudo enviar a ningún canal: ' + results[0].reason.message);
+  } else {
+    const names = failed.map((s) => `${PLATFORM_NAMES[s.p]} · ${s.ch}`).join(', ');
+    toast(`Enviado a ${targets.length - failed.length} de ${targets.length}. Falló en: ${names}`, true);
+  }
+}
+
 // El selector ofrece cada canal de las plataformas con sesión iniciada
 function updateComposer() {
   const select = $('#target');
   const targets = sources().filter((s) => PROVIDERS[s.p].logged());
   const wanted = select.value || cfg.sendTarget;
-  select.replaceChildren(...targets.map((s) => new Option(srcLabel(s.p, s.ch), s.key)));
-  if (targets.some((s) => s.key === wanted)) select.value = wanted;
+  const options = targets.map((s) => new Option(srcLabel(s.p, s.ch), s.key));
+  // Con más de un destino, "Todos" envía el mismo mensaje a todos a la vez
+  if (targets.length > 1) options.unshift(new Option(`Todos (${targets.length})`, ALL_TARGETS));
+  select.replaceChildren(...options);
+  if (wanted === ALL_TARGETS ? targets.length > 1 : targets.some((s) => s.key === wanted)) select.value = wanted;
 
   const anyLogged = PLATFORMS.some((p) => PROVIDERS[p].logged());
   $('#send-form').hidden = !targets.length;
@@ -1199,9 +1229,14 @@ function updateComposer() {
   $('#login-cta').textContent = anyLogged
     ? 'Escribe en ⚙ Ajustes los canales de la plataforma donde iniciaste sesión'
     : 'Inicia sesión en ⚙ Ajustes para escribir y moderar';
-  const [p, ch] = select.value ? splitKey(select.value) : ['', ''];
-  select.className = 'target ' + p;
-  $('#input').placeholder = p ? `Escribe en ${PLATFORM_NAMES[p]} · ${ch}…` : '';
+  if (select.value === ALL_TARGETS) {
+    select.className = 'target all';
+    $('#input').placeholder = `Escribe en todos los canales (${targets.length})…`;
+  } else {
+    const [p, ch] = select.value ? splitKey(select.value) : ['', ''];
+    select.className = 'target ' + p;
+    $('#input').placeholder = p ? `Escribe en ${PLATFORM_NAMES[p]} · ${ch}…` : '';
+  }
   if (!targets.length || (replyTarget && srcKey(replyTarget.platform, replyTarget.channel) !== select.value)) clearReply();
 }
 
@@ -1221,8 +1256,13 @@ $('#send-form').addEventListener('submit', async (e) => {
   const btn = $('#send-btn');
   btn.disabled = true;
   try {
-    const [p, ch] = splitKey($('#target').value);
-    await PROVIDERS[p].send(ch, text, replyTarget);
+    const target = $('#target').value;
+    if (target === ALL_TARGETS) {
+      await sendToAll(text);
+    } else {
+      const [p, ch] = splitKey(target);
+      await PROVIDERS[p].send(ch, text, replyTarget);
+    }
     input.value = '';
     clearReply();
   } catch (err) {
