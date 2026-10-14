@@ -193,17 +193,45 @@ async function getCurrent(t) {
     }
     return { title: c.title, category: c.game_name, categoryImg: img, tags: c.tags || [] };
   }
-  if (t.p === 'kick') {
-    const j = await kickApi('GET', 'channels?broadcaster_user_id=' + encodeURIComponent(await kickUserId()));
-    const c = j.data && j.data[0];
-    if (!c) throw new Error('Kick no devolvió los datos de tu canal');
-    return {
-      title: c.stream_title, category: c.category && c.category.name,
-      categoryImg: c.category && c.category.thumbnail, tags: (c.stream && c.stream.custom_tags) || [],
-    };
-  }
+  if (t.p === 'kick') return kickCurrent();
   const s = await svStreamFor(t);
   return { title: s.title, category: s.category, categoryImg: '', tags: s.tags || [] };
+}
+
+/*
+ * Estado de tu canal de Kick. La API oficial a veces devuelve el título y la
+ * categoría vacíos (sobre todo fuera de directo), así que se completa con la
+ * API pública de kick.com: el directo actual o, si no hay, la última categoría.
+ */
+async function kickCurrent() {
+  let official = null;
+  let officialErr = null;
+  try {
+    const j = await kickApi('GET', 'channels?broadcaster_user_id=' + encodeURIComponent(await kickUserId()));
+    official = j.data && j.data[0];
+    if (!official) officialErr = 'la API oficial no devolvió tu canal';
+  } catch (e) { officialErr = e.message; }
+
+  let pub = null;
+  const slug = ((official && official.slug) || kickAuth.name || '').toLowerCase().replace(/_/g, '-');
+  if (slug) {
+    try { pub = await fetchJson('https://kick.com/api/v2/channels/' + encodeURIComponent(slug)); } catch { /* sin respaldo */ }
+  }
+  if (!official && !pub) throw new Error('Kick: ' + officialErr);
+
+  const live = pub ? !!pub.livestream : !!(official && official.stream && official.stream.is_live);
+  const ls = pub && pub.livestream;
+  const pubCat = (ls && ls.categories && ls.categories[0]) || (pub && pub.recent_categories && pub.recent_categories[0]);
+  const offCat = official && official.category && official.category.name ? official.category : null;
+  const offTags = official && official.stream && official.stream.custom_tags;
+  return {
+    title: (official && official.stream_title) || (ls && ls.session_title) || '',
+    category: (offCat && offCat.name) || (pubCat && pubCat.name) || '',
+    categoryImg: (offCat && offCat.thumbnail) || '',
+    tags: (offTags && offTags.length ? offTags : ls && ls.tags) || [],
+    live,
+    note: officialErr && pub ? 'Datos públicos (la API con tu sesión falló: ' + officialErr + ')' : '',
+  };
 }
 
 // ID de tu usuario de Kick (las sesiones antiguas podrían no tenerlo guardado)
@@ -251,6 +279,9 @@ function renderCards() {
     } else if (cur.status === 'error') {
       card.append(el('p', 'st-card-error', '⚠ ' + cur.error));
     } else {
+      if (cur.live !== undefined) {
+        card.append(el('span', 'st-live ' + (cur.live ? 'on' : 'off'), cur.live ? '● En vivo' : 'Fuera de directo'));
+      }
       card.append(el('p', 'st-card-title', cur.title || 'Sin título'));
       const cat = el('div', 'st-card-cat');
       cat.append(catImage({ name: cur.category || '?', img: cur.categoryImg }), el('span', null, cur.category || 'Sin categoría'));
@@ -262,6 +293,7 @@ function renderCards() {
       } else {
         card.append(el('p', 'st-card-muted', 'Sin tags'));
       }
+      if (cur.note) card.append(el('p', 'st-card-warn', cur.note));
     }
     if (needsRelogin[t.p]()) card.append(el('p', 'st-card-warn', 'Vuelve a iniciar sesión para poder editar'));
 
