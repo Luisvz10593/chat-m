@@ -18,6 +18,7 @@
     <div class="brand">Chat <b>M</b></div>
     <!-- Un botón por canal; se generan desde app.js -->
     <div class="chips" id="chips"></div>
+    <button class="icon-btn" id="btn-stream" aria-label="Directo: título, categoría y tags" title="Directo">🎬</button>
     <button class="icon-btn" id="btn-settings" aria-label="Ajustes">⚙</button>
   </header>
 
@@ -142,8 +143,53 @@
     </form>
   </dialog>
 
+  <!-- Directo: título, categoría y tags -->
+  <dialog id="stream">
+    <div class="sheet">
+      <h2>Directo</h2>
+      <div>
+        <p class="note">Aplicar en:</p>
+        <div id="st-targets" class="row"></div>
+      </div>
+      <p id="st-note" class="note warn" hidden></p>
+
+      <section class="stack">
+        <h3>Cambio rápido de categoría</h3>
+        <p class="note">Toca una categoría para cambiarla al momento en las plataformas marcadas.</p>
+        <div id="st-favs" class="cat-grid"></div>
+        <div id="st-recent-box" class="stack" hidden>
+          <h4>Recientes</h4>
+          <div id="st-recent" class="cat-grid"></div>
+        </div>
+        <button type="button" id="st-edit-favs" class="link-btn">Quitar favoritas</button>
+      </section>
+
+      <section class="stack">
+        <h3>Editar</h3>
+        <p id="st-current" class="note"></p>
+        <label>Título
+          <input id="st-title" maxlength="140" autocomplete="off">
+        </label>
+        <label>Categoría
+          <input id="st-cat-search" placeholder="Buscar categoría… (☆ = favorita)" autocomplete="off">
+        </label>
+        <div id="st-cat-selected"></div>
+        <div id="st-cat-results" class="cat-list"></div>
+        <label>Tags (máximo 10, separados por coma)
+          <input id="st-tags" autocomplete="off" autocapitalize="off">
+        </label>
+      </section>
+
+      <div class="row end">
+        <button type="button" id="st-close">Cerrar</button>
+        <button type="button" class="primary" id="st-apply">Aplicar cambios</button>
+      </div>
+    </div>
+  </dialog>
+
   <div id="toast" role="status"></div>
 
   <script src="app.js"></script>
+  <script src="stream.js"></script>
 </body>
 </html>

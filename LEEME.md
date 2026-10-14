@@ -16,6 +16,11 @@ Chat unificado de **Twitch + Kick + Starvios** para la tablet, pensado para usar
   te deja elegir plataforma y canal.
 - Toca un mensaje para **responder, mencionar, borrar, dar timeout o banear** en su plataforma.
 - Escribe en cualquier plataforma donde iniciaste sesión (selector junto al campo de texto).
+- **Todos:** en el selector para escribir, envía el mismo mensaje a todos los canales a la vez.
+- Los mensajes se ordenan por la hora en que se escribieron, sin importar la plataforma.
+- **🎬 Directo:** cambia título, categoría y tags de tu directo en una plataforma o en
+  varias a la vez. Tiene 12 categorías favoritas (búscalas y toca ☆) y las 3 recientes:
+  tocar una cambia la categoría al momento. Starvios no permite tags.
 - Mantiene la pantalla de la tablet encendida.
 
 > **Privacidad:** los Client ID, el Client Secret de Kick y las sesiones se guardan
@@ -56,8 +61,9 @@ Para leer el chat no hace falta iniciar sesión.
 1. En kick.com entra a tu perfil → **Settings → Developer** y crea una app.
 2. **Redirect URL:** la misma URL que aparece en ⚙ Ajustes
    (`https://luisvz10593.github.io/chat-m/`, y `http://localhost:8080/` si pruebas en la PC).
-3. Activa los permisos: **Read user info**, **Read channel info**, **Write to chat**,
-   **Moderation: ban users** y **Moderation: manage chat messages**.
+3. Activa los permisos: **Read user info**, **Read channel info**, **Write channel info**
+   (para 🎬 Directo), **Write to chat**, **Moderation: ban users** y
+   **Moderation: manage chat messages**.
 4. Copia el **Client ID** y el **Client Secret** y pégalos **en la tablet**, en
    ⚙ Ajustes → Cuenta de Kick. Toca **Iniciar sesión**.
 

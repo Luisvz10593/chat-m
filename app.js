@@ -76,6 +76,7 @@ const TWITCH_SCOPES = [
   'user:write:chat',
   'moderator:manage:chat_messages',
   'moderator:manage:banned_users',
+  'channel:manage:broadcast', // título, categoría y tags del directo
 ].join(' ');
 
 const MAX_MESSAGES = 400;
@@ -534,7 +535,7 @@ async function validateToken(token) {
     const r = await fetch('https://id.twitch.tv/oauth2/validate', { headers: { Authorization: 'OAuth ' + token } });
     if (!r.ok) throw new Error('token inválido');
     const j = await r.json();
-    auth = { token, login: j.login, userId: j.user_id };
+    auth = { token, login: j.login, userId: j.user_id, scopes: j.scopes || [] };
     store.set('auth', auth);
     return true;
   } catch {
@@ -731,7 +732,7 @@ function kickParts(text) {
    El Client Secret lo escribe el usuario en Ajustes y solo
    se guarda en este dispositivo (localStorage).
    ========================================================= */
-const KICK_SCOPES = 'user:read channel:read chat:write moderation:ban moderation:chat_message:manage';
+const KICK_SCOPES = 'user:read channel:read channel:write chat:write moderation:ban moderation:chat_message:manage';
 const KICK_API = 'https://api.kick.com/public/v1/';
 let kickAuth = store.get('kickAuth', null); // { access, refresh, expiresAt, userId, name }
 const kickBroadcasters = {};                // canal → broadcaster_user_id
@@ -788,6 +789,7 @@ async function kickTokenRequest(params) {
     access: j.access_token,
     refresh: j.refresh_token || (kickAuth && kickAuth.refresh),
     expiresAt: Date.now() + (j.expires_in || 3600) * 1000,
+    scope: j.scope || (kickAuth && kickAuth.scope) || '',
   };
   store.set('kickAuth', kickAuth);
 }
