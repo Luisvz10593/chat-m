@@ -36,10 +36,33 @@ const PLATFORMS = ['twitch', 'kick', 'starvios'];
 const PLATFORM_NAMES = { twitch: 'Twitch', kick: 'Kick', starvios: 'Starvios' };
 const cfg = Object.assign({}, DEFAULTS, store.get('cfg', {}));
 
-// Cada plataforma admite varios canales separados por coma o espacio
+// Cada plataforma admite varios canales separados por coma o espacio.
+// También acepta el enlace del canal (twitch.tv/x, kick.com/x, starvios.com/live/x).
+function cleanChannel(c) {
+  return c
+    .replace(/^https?:\/\//, '')
+    .replace(/^(www\.|m\.)?(twitch\.tv|kick\.com|starvios\.com)\/(live\/)?/, '')
+    .split(/[/?#]/)[0]
+    .replace(/^[#@]/, '');
+}
 function channelsOf(p) {
   return [...new Set(String(cfg[p + 'Channel'] || '').toLowerCase()
-    .split(/[\s,;]+/).map((c) => c.replace(/^[#@]/, '')).filter(Boolean))];
+    .split(/[\s,;]+/).map(cleanChannel).filter(Boolean))];
+}
+
+// fetch con límite de tiempo, para que ninguna conexión se quede "cargando" para siempre
+async function fetchJson(url, opts = {}, ms = 10000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const r = await fetch(url, { ...opts, signal: ctrl.signal });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return await r.json();
+  } catch (e) {
+    throw new Error(e.name === 'AbortError' ? 'sin respuesta' : e.message);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 // Un "origen" es un canal concreto de una plataforma: "twitch:canal"
 const srcKey = (p, ch) => p + ':' + ch;
@@ -291,6 +314,14 @@ function connectTwitch() {
     ws.send('PASS SCHMOOPIIE');
     ws.send('NICK justinfan' + Math.floor(1000 + Math.random() * 80000));
     ws.send('JOIN ' + chans.map((c) => '#' + c).join(','));
+    // Twitch no avisa cuando un canal no existe: si no responde, lo marcamos
+    setTimeout(() => {
+      if (twitchWs !== ws) return;
+      for (const ch of chans) {
+        const key = srcKey('twitch', ch);
+        if (statusMap[key] && statusMap[key].status === 'wait') setStatus(key, 'err', 'no encontrado');
+      }
+    }, 10000);
   };
   ws.onmessage = (e) => {
     for (const line of e.data.split('\r\n')) if (line) handleIrc(ws, parseIrc(line));
@@ -359,6 +390,9 @@ function handleIrc(ws, msg) {
       break;
     }
     case 'NOTICE':
+      if (known && /suspended|banned|unavailable/i.test(tags['msg-id'] || '')) {
+        setStatus(srcKey('twitch', ch), 'err', 'no disponible');
+      }
       if (trailing) addSystem('twitch', trailing, false, known ? ch : null);
       break;
     case 'RECONNECT':
@@ -553,9 +587,10 @@ async function twitchBan(ch, userId, duration) {
 }
 
 /* =========================================================
-   KICK — lectura consultando el historial del chat
-   (Kick retiró su WebSocket público de Pusher y el nuevo
-   solo acepta conexiones desde kick.com, así que pedimos
+   KICK — lectura consultando los últimos mensajes del canal
+   (Kick retiró su WebSocket público de Pusher, el nuevo solo
+   acepta conexiones desde kick.com y web.kick.com bloquea
+   otras webs; kick.com/api/v2 sí responde, así que pedimos
    los últimos mensajes cada 2 segundos.)
    ========================================================= */
 const KICK_POLL_MS = 2000;
@@ -563,17 +598,16 @@ let kickGen = 0;               // invalida ciclos de consulta anteriores al reco
 const kickTimers = new Map();  // canal → temporizador de su consulta
 const kickSeen = new Set();
 
-async function resolveKickRoom(slug, allowManual) {
+// Los mensajes se piden con el ID del canal (no el del chatroom, que a veces es distinto)
+async function resolveKickChannel(slug, allowManual) {
   if (allowManual && cfg.kickChatroomId) return String(cfg.kickChatroomId).trim();
-  const cached = store.get('kickRoom.' + slug, null);
+  const cached = store.get('kickChan.' + slug, null);
   if (cached) return cached;
-  const r = await fetch('https://kick.com/api/v2/channels/' + encodeURIComponent(slug));
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  const j = await r.json();
-  const id = j && j.chatroom && j.chatroom.id;
-  if (!id) throw new Error('sin chatroom');
-  store.set('kickRoom.' + slug, String(id));
-  return String(id);
+  // En las URL de Kick los "_" del nombre de usuario se escriben como "-"
+  const j = await fetchJson('https://kick.com/api/v2/channels/' + encodeURIComponent(slug.replace(/_/g, '-')));
+  if (!j || !j.id) throw new Error('no existe');
+  store.set('kickChan.' + slug, String(j.id));
+  return String(j.id);
 }
 
 function connectKick() {
@@ -587,15 +621,20 @@ function connectKick() {
 
 async function watchKick(slug, gen, allowManual) {
   const key = srcKey('kick', slug);
+  if (gen !== kickGen) return;
   setStatus(key, 'wait', 'conectando…');
-  let roomId;
+  let channelId;
   try {
-    roomId = await resolveKickRoom(slug, allowManual);
-  } catch {
+    channelId = await resolveKickChannel(slug, allowManual);
+  } catch (e) {
     if (gen !== kickGen) return;
-    setStatus(key, 'err', 'falta ID');
-    addSystem('kick', 'No se pudo detectar este chat de Kick automáticamente.'
-      + (allowManual ? ' Abre Ajustes → Avanzado y escribe el ID del chatroom.' : ''), false, slug);
+    if (e.message === 'no existe' || e.message === 'HTTP 404') {
+      setStatus(key, 'err', 'no existe');
+      return;
+    }
+    // Error de red o bloqueo temporal: reintenta en 15 s
+    setStatus(key, 'err', 'reintentando…');
+    kickTimers.set(slug, setTimeout(() => watchKick(slug, gen, allowManual), 15000));
     return;
   }
 
@@ -604,9 +643,9 @@ async function watchKick(slug, gen, allowManual) {
   const poll = async () => {
     if (gen !== kickGen) return;
     try {
-      const r = await fetch(`https://web.kick.com/api/v1/chat/${encodeURIComponent(roomId)}/history`, { cache: 'no-store' });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      const j = await r.json();
+      // "?t=" evita la caché de 10 s de Kick para recibir los mensajes al momento
+      const j = await fetchJson(`https://kick.com/api/v2/channels/${encodeURIComponent(channelId)}/messages?t=${Date.now()}`,
+        { cache: 'no-store' });
       if (gen !== kickGen) return;
       // Kick los entrega del más nuevo al más viejo
       const msgs = ((j.data && j.data.messages) || []).slice().reverse();
@@ -804,7 +843,7 @@ async function kickApi(method, path, body, retried) {
 
 async function kickBroadcasterId(slug) {
   if (kickBroadcasters[slug]) return kickBroadcasters[slug];
-  const j = await kickApi('GET', 'channels?slug=' + encodeURIComponent(slug));
+  const j = await kickApi('GET', 'channels?slug=' + encodeURIComponent(slug.replace(/_/g, '-')));
   const ch = j.data && j.data[0];
   if (!ch) throw new Error('Kick no encontró el canal ' + slug);
   kickBroadcasters[slug] = ch.broadcaster_user_id;
@@ -845,10 +884,8 @@ const svTimers = new Map(); // canal → temporizador de su consulta
 const svStreams = {};       // canal → { id, channelId, last } (last = created_at del último mensaje)
 const svSeen = new Set();
 
-async function svGet(path) {
-  const r = await fetch(SV_URL + path, { headers: { apikey: SV_KEY }, cache: 'no-store' });
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return r.json();
+function svGet(path) {
+  return fetchJson(SV_URL + path, { headers: { apikey: SV_KEY }, cache: 'no-store' });
 }
 
 function connectStarvios() {
