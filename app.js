@@ -25,19 +25,28 @@ const DEFAULTS = {
   kickClientId: '',
   kickClientSecret: '', // solo vive en este dispositivo
   kickChatroomId: '',
-  sendTarget: 'twitch',
+  sendTarget: '',  // "plataforma:canal" donde escribir
+  hidden: [],      // canales ocultos, como "plataforma:canal"
   fontSize: 19,
   showTime: true,
   wakeLock: true,
-  showTwitch: true,
-  showKick: true,
-  showStarvios: true,
 };
 
 const PLATFORMS = ['twitch', 'kick', 'starvios'];
 const PLATFORM_NAMES = { twitch: 'Twitch', kick: 'Kick', starvios: 'Starvios' };
-const showKey = (p) => 'show' + p[0].toUpperCase() + p.slice(1);
 const cfg = Object.assign({}, DEFAULTS, store.get('cfg', {}));
+
+// Cada plataforma admite varios canales separados por coma o espacio
+function channelsOf(p) {
+  return [...new Set(String(cfg[p + 'Channel'] || '').toLowerCase()
+    .split(/[\s,;]+/).map((c) => c.replace(/^[#@]/, '')).filter(Boolean))];
+}
+// Un "origen" es un canal concreto de una plataforma: "twitch:canal"
+const srcKey = (p, ch) => p + ':' + ch;
+const splitKey = (k) => { const i = k.indexOf(':'); return [k.slice(0, i), k.slice(i + 1)]; };
+const sources = () => PLATFORMS.flatMap((p) => channelsOf(p).map((ch) => ({ p, ch, key: srcKey(p, ch) })));
+const multiChannel = () => PLATFORMS.some((p) => channelsOf(p).length > 1);
+const srcLabel = (p, ch) => (channelsOf(p).length > 1 ? `${PLATFORM_NAMES[p]} · ${ch}` : PLATFORM_NAMES[p]);
 let auth = store.get('auth', null); // { token, login, userId }
 
 const TWITCH_SCOPES = [
@@ -59,19 +68,53 @@ function toast(text, isError = false) {
   toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
 }
 
-function setStatus(platform, status, text) {
-  const chip = $('#chip-' + platform);
+// Estado de conexión de cada canal, para pintarlo en su botón de arriba
+const statusMap = {};
+const chipFor = (key) => document.querySelector(`.chip[data-src="${CSS.escape(key)}"]`);
+
+function setStatus(key, status, text) {
+  statusMap[key] = { status, text };
+  const chip = chipFor(key);
+  if (!chip) return;
   chip.dataset.status = status;
-  $('#st-' + platform).textContent = text;
+  chip.querySelector('.state').textContent = text;
 }
+
+function renderChips() {
+  const hidden = new Set(cfg.hidden);
+  $('#chips').replaceChildren(...sources().map(({ p, ch, key }) => {
+    const st = statusMap[key] || { status: 'wait', text: '…' };
+    const b = document.createElement('button');
+    b.className = 'chip ' + p;
+    b.dataset.src = key;
+    b.dataset.status = st.status;
+    b.title = `${PLATFORM_NAMES[p]} · ${ch} (toca para ocultar o mostrar)`;
+    b.setAttribute('aria-pressed', String(!hidden.has(key)));
+    b.innerHTML = '<span class="dot"></span><span class="label"></span><span class="state"></span>';
+    b.querySelector('.label').textContent = ch;
+    b.querySelector('.state').textContent = st.text;
+    b.addEventListener('click', () => {
+      const set = new Set(cfg.hidden);
+      if (set.has(key)) set.delete(key); else set.add(key);
+      cfg.hidden = [...set];
+      saveCfg();
+      applyView();
+    });
+    return b;
+  }));
+}
+
+const hideStyle = document.head.appendChild(document.createElement('style'));
 
 function applyView() {
   document.documentElement.style.setProperty('--fs', cfg.fontSize + 'px');
   document.body.classList.toggle('hide-time', !cfg.showTime);
-  for (const p of PLATFORMS) {
-    document.body.classList.toggle('hide-' + p, !cfg[showKey(p)]);
-    $('#chip-' + p).setAttribute('aria-pressed', String(cfg[showKey(p)]));
-  }
+  document.body.classList.toggle('show-channel', multiChannel());
+  // Oculta los mensajes de los canales apagados
+  hideStyle.textContent = cfg.hidden.length
+    ? cfg.hidden.map((k) => `.msg[data-src="${CSS.escape(k)}"]`).join(',') + '{display:none}'
+    : '';
+  renderChips();
   updateComposer();
 }
 
@@ -95,17 +138,25 @@ function fmtTime(d) {
 }
 
 function myNames() {
-  return [auth && auth.login, cfg.twitchChannel, cfg.kickChannel]
+  return [auth && auth.login, kickAuth && kickAuth.name, ...sources().map((s) => s.ch)]
     .filter(Boolean).map((n) => n.toLowerCase());
 }
 
+function chanTag(ch) {
+  const tag = document.createElement('span');
+  tag.className = 'chan';
+  tag.textContent = '#' + ch;
+  return tag;
+}
+
 /**
- * m = { platform, id, userId, user, color, badges:[string],
+ * m = { platform, channel, id, userId, user, color, badges:[string],
  *       parts:[{text}|{img, alt}], time:Date, action?, replyTo? }
  */
 function addMessage(m) {
   const el = document.createElement('div');
   el.className = 'msg ' + m.platform;
+  el.dataset.src = srcKey(m.platform, m.channel);
   el.dataset.id = m.id || '';
   el.dataset.user = (m.user || '').toLowerCase();
   el._msg = m;
@@ -116,6 +167,7 @@ function addMessage(m) {
 
   const content = document.createElement('div');
   content.className = 'content';
+  content.append(chanTag(m.channel));
 
   if (m.replyTo) {
     const ref = document.createElement('span');
@@ -161,15 +213,17 @@ function addMessage(m) {
   pushEl(el);
 }
 
-function addSystem(platform, text, highlight = false) {
+function addSystem(platform, text, highlight = false, channel = null) {
   const el = document.createElement('div');
   el.className = 'msg system ' + platform + (highlight ? ' highlight' : '');
+  if (channel) el.dataset.src = srcKey(platform, channel);
   const time = document.createElement('span');
   time.className = 'time';
   time.textContent = fmtTime(new Date());
   const content = document.createElement('div');
   content.className = 'content';
-  content.textContent = text;
+  if (channel) content.append(chanTag(channel));
+  content.append(text);
   el.append(time, content);
   pushEl(el);
 }
@@ -188,9 +242,9 @@ function markDeleted(platform, id) {
   }
 }
 
-function markUserCleared(platform, username) {
+function markUserCleared(platform, channel, username) {
   const u = String(username || '').toLowerCase();
-  for (const el of feed.querySelectorAll('.msg.' + platform)) {
+  for (const el of feed.querySelectorAll(`.msg[data-src="${CSS.escape(srcKey(platform, channel))}"]`)) {
     if (el.dataset.user === u) el.classList.add('deleted');
   }
 }
@@ -221,21 +275,22 @@ function readableColor(color, platform) {
    ========================================================= */
 let twitchWs = null;
 let twitchRetry = 0;
-let twitchRoomId = null; // id del broadcaster (viene en ROOMSTATE)
+const twitchRooms = {}; // canal → id del broadcaster (viene en ROOMSTATE)
 
+// Una sola conexión IRC se une a todos los canales de Twitch
 function connectTwitch() {
   if (twitchWs) { twitchWs.onclose = null; twitchWs.close(); twitchWs = null; }
-  const ch = cfg.twitchChannel.trim().toLowerCase().replace(/^#/, '');
-  if (!ch) { setStatus('twitch', 'off', 'sin canal'); return; }
+  const chans = channelsOf('twitch');
+  if (!chans.length) return;
 
-  setStatus('twitch', 'wait', 'conectando…');
+  for (const ch of chans) setStatus(srcKey('twitch', ch), 'wait', 'conectando…');
   const ws = twitchWs = new WebSocket('wss://irc-ws.chat.twitch.tv:443');
 
   ws.onopen = () => {
     ws.send('CAP REQ :twitch.tv/tags twitch.tv/commands');
     ws.send('PASS SCHMOOPIIE');
     ws.send('NICK justinfan' + Math.floor(1000 + Math.random() * 80000));
-    ws.send('JOIN #' + ch);
+    ws.send('JOIN ' + chans.map((c) => '#' + c).join(','));
   };
   ws.onmessage = (e) => {
     for (const line of e.data.split('\r\n')) if (line) handleIrc(ws, parseIrc(line));
@@ -243,7 +298,7 @@ function connectTwitch() {
   ws.onclose = () => {
     if (twitchWs !== ws) return;
     const wait = Math.min(30000, 1000 * 2 ** twitchRetry++);
-    setStatus('twitch', 'err', 'reconectando…');
+    for (const ch of chans) setStatus(srcKey('twitch', ch), 'err', 'reconectando…');
     setTimeout(() => { if (twitchWs === ws) connectTwitch(); }, wait);
   };
 }
@@ -277,32 +332,34 @@ function parseIrc(line) {
 
 function handleIrc(ws, msg) {
   const { tags, command, trailing } = msg;
+  const ch = (msg.params[0] || '').replace(/^#/, '');
+  const known = channelsOf('twitch').includes(ch);
   switch (command) {
     case 'PING':
       ws.send('PONG :' + (trailing || 'tmi.twitch.tv'));
       break;
     case 'ROOMSTATE':
-      if (tags['room-id']) twitchRoomId = tags['room-id'];
+      if (tags['room-id']) twitchRooms[ch] = tags['room-id'];
       twitchRetry = 0;
-      setStatus('twitch', 'ok', cfg.twitchChannel.toLowerCase());
+      setStatus(srcKey('twitch', ch), 'ok', 'Twitch');
       break;
     case 'PRIVMSG':
-      handleTwitchMsg(tags, msg.prefix, trailing || '');
+      handleTwitchMsg(tags, msg.prefix, trailing || '', ch);
       break;
     case 'CLEARMSG':
       markDeleted('twitch', tags['target-msg-id']);
       break;
     case 'CLEARCHAT':
-      if (trailing) markUserCleared('twitch', trailing);
-      else addSystem('twitch', 'El chat de Twitch fue limpiado por un moderador.');
+      if (trailing) markUserCleared('twitch', ch, trailing);
+      else addSystem('twitch', 'El chat de Twitch fue limpiado por un moderador.', false, ch);
       break;
     case 'USERNOTICE': {
       const sys = tags['system-msg'] || '';
-      addSystem('twitch', sys + (trailing ? ' — ' + trailing : ''), true);
+      addSystem('twitch', sys + (trailing ? ' — ' + trailing : ''), true, ch);
       break;
     }
     case 'NOTICE':
-      if (trailing) addSystem('twitch', trailing);
+      if (trailing) addSystem('twitch', trailing, false, known ? ch : null);
       break;
     case 'RECONNECT':
       connectTwitch();
@@ -310,7 +367,7 @@ function handleIrc(ws, msg) {
   }
 }
 
-function handleTwitchMsg(tags, prefix, text) {
+function handleTwitchMsg(tags, prefix, text, channel) {
   let action = false;
   if (text.startsWith('\x01ACTION ')) { action = true; text = text.slice(8).replace(/\x01$/, ''); }
 
@@ -325,6 +382,7 @@ function handleTwitchMsg(tags, prefix, text) {
 
   addMessage({
     platform: 'twitch',
+    channel,
     id: tags.id,
     userId: tags['user-id'],
     user: tags['display-name'] || prefix.split('!')[0],
@@ -467,30 +525,30 @@ async function helix(method, path, params, body) {
   return j;
 }
 
-function requireRoom() {
-  if (!twitchRoomId) throw new Error('Aún no hay conexión con el canal de Twitch.');
-  return twitchRoomId;
+function requireRoom(ch) {
+  if (!twitchRooms[ch]) throw new Error(`Aún no hay conexión con el canal de Twitch ${ch}.`);
+  return twitchRooms[ch];
 }
 
-async function twitchSend(message, replyId) {
-  const body = { broadcaster_id: requireRoom(), sender_id: auth.userId, message };
+async function twitchSend(ch, message, replyId) {
+  const body = { broadcaster_id: requireRoom(ch), sender_id: auth.userId, message };
   if (replyId) body.reply_parent_message_id = replyId;
   const j = await helix('POST', 'chat/messages', null, body);
   const res = j.data && j.data[0];
   if (res && !res.is_sent) throw new Error((res.drop_reason && res.drop_reason.message) || 'Twitch no envió el mensaje.');
 }
 
-async function twitchDelete(messageId) {
+async function twitchDelete(ch, messageId) {
   await helix('DELETE', 'moderation/chat', {
-    broadcaster_id: requireRoom(), moderator_id: auth.userId, message_id: messageId,
+    broadcaster_id: requireRoom(ch), moderator_id: auth.userId, message_id: messageId,
   });
 }
 
-async function twitchBan(userId, duration) {
+async function twitchBan(ch, userId, duration) {
   const data = { user_id: userId, reason: 'Chat M' };
   if (duration) data.duration = duration;
   await helix('POST', 'moderation/bans', {
-    broadcaster_id: requireRoom(), moderator_id: auth.userId,
+    broadcaster_id: requireRoom(ch), moderator_id: auth.userId,
   }, { data });
 }
 
@@ -501,14 +559,12 @@ async function twitchBan(userId, duration) {
    los últimos mensajes cada 2 segundos.)
    ========================================================= */
 const KICK_POLL_MS = 2000;
-let kickGen = 0;          // invalida ciclos de consulta anteriores al reconectar
-let kickTimer = null;
-let kickFails = 0;
-let kickPrev = [];        // [{id, t}] de la consulta anterior
+let kickGen = 0;               // invalida ciclos de consulta anteriores al reconectar
+const kickTimers = new Map();  // canal → temporizador de su consulta
 const kickSeen = new Set();
 
-async function resolveKickRoom(slug) {
-  if (cfg.kickChatroomId) return String(cfg.kickChatroomId).trim();
+async function resolveKickRoom(slug, allowManual) {
+  if (allowManual && cfg.kickChatroomId) return String(cfg.kickChatroomId).trim();
   const cached = store.get('kickRoom.' + slug, null);
   if (cached) return cached;
   const r = await fetch('https://kick.com/api/v2/channels/' + encodeURIComponent(slug));
@@ -520,24 +576,31 @@ async function resolveKickRoom(slug) {
   return String(id);
 }
 
-async function connectKick() {
+function connectKick() {
   const gen = ++kickGen;
-  clearTimeout(kickTimer);
-  kickPrev = [];
-  const slug = cfg.kickChannel.trim().toLowerCase();
-  if (!slug) { setStatus('kick', 'off', 'sin canal'); return; }
+  for (const t of kickTimers.values()) clearTimeout(t);
+  kickTimers.clear();
+  const slugs = channelsOf('kick');
+  // El ID manual de Ajustes → Avanzado solo aplica si hay un único canal
+  for (const slug of slugs) watchKick(slug, gen, slugs.length === 1);
+}
 
-  setStatus('kick', 'wait', 'conectando…');
+async function watchKick(slug, gen, allowManual) {
+  const key = srcKey('kick', slug);
+  setStatus(key, 'wait', 'conectando…');
   let roomId;
   try {
-    roomId = await resolveKickRoom(slug);
+    roomId = await resolveKickRoom(slug, allowManual);
   } catch {
     if (gen !== kickGen) return;
-    setStatus('kick', 'err', 'falta ID');
-    addSystem('kick', 'No se pudo detectar el chat de Kick automáticamente. Abre Ajustes → Avanzado y escribe el ID del chatroom.');
+    setStatus(key, 'err', 'falta ID');
+    addSystem('kick', 'No se pudo detectar este chat de Kick automáticamente.'
+      + (allowManual ? ' Abre Ajustes → Avanzado y escribe el ID del chatroom.' : ''), false, slug);
     return;
   }
 
+  let prev = []; // [{id, t}] de la consulta anterior
+  let fails = 0;
   const poll = async () => {
     if (gen !== kickGen) return;
     try {
@@ -547,34 +610,34 @@ async function connectKick() {
       if (gen !== kickGen) return;
       // Kick los entrega del más nuevo al más viejo
       const msgs = ((j.data && j.data.messages) || []).slice().reverse();
-      detectKickDeletions(msgs);
-      msgs.forEach(handleKickMsg);
-      kickFails = 0;
-      setStatus('kick', 'ok', slug);
+      prev = detectKickDeletions(msgs, prev);
+      msgs.forEach((d) => handleKickMsg(d, slug));
+      fails = 0;
+      setStatus(key, 'ok', 'Kick');
     } catch {
       if (gen !== kickGen) return;
-      kickFails++;
-      setStatus('kick', 'err', 'reintentando…');
+      fails++;
+      setStatus(key, 'err', 'reintentando…');
     }
-    const wait = kickFails ? Math.min(30000, KICK_POLL_MS * 2 ** kickFails) : KICK_POLL_MS;
-    kickTimer = setTimeout(poll, wait);
+    const wait = fails ? Math.min(30000, KICK_POLL_MS * 2 ** fails) : KICK_POLL_MS;
+    kickTimers.set(slug, setTimeout(poll, wait));
   };
   poll();
 }
 
 // Un mensaje que estaba en la consulta anterior y desaparece, aunque sigan
 // llegando mensajes más viejos que él, fue borrado por un moderador.
-function detectKickDeletions(msgs) {
+function detectKickDeletions(msgs, prev) {
   const now = msgs.map((m) => ({ id: m.id, t: Date.parse(m.created_at) || 0 }));
-  if (now.length && kickPrev.length) {
+  if (now.length && prev.length) {
     const oldest = now[0].t;
     const ids = new Set(now.map((m) => m.id));
-    for (const p of kickPrev) if (p.t > oldest && !ids.has(p.id)) markDeleted('kick', p.id);
+    for (const p of prev) if (p.t > oldest && !ids.has(p.id)) markDeleted('kick', p.id);
   }
-  kickPrev = now;
+  return now;
 }
 
-function handleKickMsg(d) {
+function handleKickMsg(d, channel) {
   if (!d || !d.id || kickSeen.has(d.id)) return;
   kickSeen.add(d.id);
   if (kickSeen.size > 3000) kickSeen.delete(kickSeen.values().next().value);
@@ -589,6 +652,7 @@ function handleKickMsg(d) {
 
   addMessage({
     platform: 'kick',
+    channel,
     id: d.id,
     userId: sender.id,
     user: sender.username || sender.slug || '?',
@@ -621,7 +685,7 @@ function kickParts(text) {
 const KICK_SCOPES = 'user:read channel:read chat:write moderation:ban moderation:chat_message:manage';
 const KICK_API = 'https://api.kick.com/public/v1/';
 let kickAuth = store.get('kickAuth', null); // { access, refresh, expiresAt, userId, name }
-let kickBroadcaster = null;                 // { slug, id }
+const kickBroadcasters = {};                // canal → broadcaster_user_id
 
 const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)))
   .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -653,7 +717,7 @@ async function kickLogin() {
 
 function kickLogout(silent) {
   kickAuth = null;
-  kickBroadcaster = null;
+  for (const k of Object.keys(kickBroadcasters)) delete kickBroadcasters[k];
   store.set('kickAuth', null);
   updateAuthUi();
   updateComposer();
@@ -738,19 +802,17 @@ async function kickApi(method, path, body, retried) {
   return j;
 }
 
-async function kickBroadcasterId() {
-  const slug = cfg.kickChannel.trim().toLowerCase();
-  if (!slug) throw new Error('Escribe tu canal de Kick en Ajustes.');
-  if (kickBroadcaster && kickBroadcaster.slug === slug) return kickBroadcaster.id;
+async function kickBroadcasterId(slug) {
+  if (kickBroadcasters[slug]) return kickBroadcasters[slug];
   const j = await kickApi('GET', 'channels?slug=' + encodeURIComponent(slug));
   const ch = j.data && j.data[0];
   if (!ch) throw new Error('Kick no encontró el canal ' + slug);
-  kickBroadcaster = { slug, id: ch.broadcaster_user_id };
-  return kickBroadcaster.id;
+  kickBroadcasters[slug] = ch.broadcaster_user_id;
+  return kickBroadcasters[slug];
 }
 
-async function kickSend(content, replyId) {
-  const body = { type: 'user', broadcaster_user_id: await kickBroadcasterId(), content };
+async function kickSend(slug, content, replyId) {
+  const body = { type: 'user', broadcaster_user_id: await kickBroadcasterId(slug), content };
   if (replyId) body.reply_to_message_id = replyId;
   await kickApi('POST', 'chat', body);
 }
@@ -759,8 +821,8 @@ async function kickDelete(messageId) {
   await kickApi('DELETE', 'chat/' + encodeURIComponent(messageId));
 }
 
-async function kickBan(userId, minutes) {
-  const body = { broadcaster_user_id: await kickBroadcasterId(), user_id: Number(userId), reason: 'Chat M' };
+async function kickBan(slug, userId, minutes) {
+  const body = { broadcaster_user_id: await kickBroadcasterId(slug), user_id: Number(userId), reason: 'Chat M' };
   if (minutes) body.duration = minutes;
   await kickApi('POST', 'moderation/bans', body);
 }
@@ -779,10 +841,8 @@ const SV_EVENTS = { sub: '⭐ se suscribió', gift_sub: '🎁 regaló suscripcio
   raid: '🚀 raid', reward: '🏆 canjeó una recompensa', starfall: '🌠 lluvia de estrellas', highlight: '✨ mensaje destacado' };
 
 let svGen = 0;
-let svTimer = null;
-let svStream = null;   // { id, channelId }
-let svLast = null;     // created_at del último mensaje recibido
-let svPolls = 0;
+const svTimers = new Map(); // canal → temporizador de su consulta
+const svStreams = {};       // canal → { id, channelId, last } (last = created_at del último mensaje)
 const svSeen = new Set();
 
 async function svGet(path) {
@@ -791,70 +851,77 @@ async function svGet(path) {
   return r.json();
 }
 
-async function connectStarvios() {
+function connectStarvios() {
   const gen = ++svGen;
-  clearTimeout(svTimer);
-  svStream = null;
-  svLast = null;
-  const name = cfg.starviosChannel.trim().toLowerCase().replace(/^@/, '');
-  if (!name) { setStatus('starvios', 'off', 'sin canal'); return; }
+  for (const t of svTimers.values()) clearTimeout(t);
+  svTimers.clear();
+  for (const k of Object.keys(svStreams)) delete svStreams[k];
+  for (const name of channelsOf('starvios')) watchStarvios(name, gen);
+}
 
-  setStatus('starvios', 'wait', 'conectando…');
+async function watchStarvios(name, gen) {
+  if (gen !== svGen) return;
+  const key = srcKey('starvios', name);
+  setStatus(key, 'wait', 'conectando…');
   try {
     const [profile] = await svGet('profiles?select=id&username=eq.' + encodeURIComponent(name));
     if (!profile) throw new Error('no existe');
     const [stream] = await svGet('live_streams?select=id,started_at,chat_cleared_at&order=started_at.desc&limit=1&channel_id=eq.' + profile.id);
     if (!stream) throw new Error('sin directos');
     if (gen !== svGen) return;
-    svStream = { id: stream.id, channelId: profile.id };
     // Empieza desde el inicio del directo actual (o la última limpieza del chat)
-    svLast = [stream.started_at, stream.chat_cleared_at].filter(Boolean).sort().pop() || new Date().toISOString();
+    const last = [stream.started_at, stream.chat_cleared_at].filter(Boolean).sort().pop() || new Date().toISOString();
+    svStreams[name] = { id: stream.id, channelId: profile.id, last };
     const recent = await svGet(`live_chat_messages?select=${SV_FIELDS}&stream_id=eq.${stream.id}`
-      + `&created_at=gt.${encodeURIComponent(svLast)}&order=created_at.desc&limit=30`);
+      + `&created_at=gt.${encodeURIComponent(last)}&order=created_at.desc&limit=30`);
     if (gen !== svGen) return;
-    recent.reverse().forEach(handleStarviosMsg);
+    recent.reverse().forEach((d) => handleStarviosMsg(d, name));
   } catch (e) {
     if (gen !== svGen) return;
-    setStatus('starvios', 'err', e.message === 'no existe' ? 'canal no existe' : 'reintentando…');
-    if (e.message !== 'no existe') svTimer = setTimeout(connectStarvios, 10000);
+    setStatus(key, 'err', e.message === 'no existe' ? 'no existe' : 'reintentando…');
+    if (e.message !== 'no existe') svTimers.set(name, setTimeout(() => watchStarvios(name, gen), 10000));
     return;
   }
 
   let fails = 0;
+  let polls = 0;
   const poll = async () => {
     if (gen !== svGen) return;
+    const s = svStreams[name];
     try {
-      const rows = await svGet(`live_chat_messages?select=${SV_FIELDS}&stream_id=eq.${svStream.id}`
-        + `&created_at=gt.${encodeURIComponent(svLast)}&order=created_at.asc&limit=100`);
+      const rows = await svGet(`live_chat_messages?select=${SV_FIELDS}&stream_id=eq.${s.id}`
+        + `&created_at=gt.${encodeURIComponent(s.last)}&order=created_at.asc&limit=100`);
       if (gen !== svGen) return;
-      rows.forEach(handleStarviosMsg);
+      rows.forEach((d) => handleStarviosMsg(d, name));
       // Cada ~10 s revisa qué mensajes borraron los moderadores
-      if (++svPolls % 5 === 0) await svCheckDeleted(gen);
+      if (++polls % 5 === 0) await svCheckDeleted(name, gen);
       fails = 0;
-      setStatus('starvios', 'ok', cfg.starviosChannel.toLowerCase());
+      setStatus(key, 'ok', 'Starvios');
     } catch {
       if (gen !== svGen) return;
       fails++;
-      setStatus('starvios', 'err', 'reintentando…');
+      setStatus(key, 'err', 'reintentando…');
     }
-    svTimer = setTimeout(poll, fails ? Math.min(30000, SV_POLL_MS * 2 ** fails) : SV_POLL_MS);
+    svTimers.set(name, setTimeout(poll, fails ? Math.min(30000, SV_POLL_MS * 2 ** fails) : SV_POLL_MS));
   };
   poll();
 }
 
-async function svCheckDeleted(gen) {
-  const shown = feed.querySelector('.msg.starvios[data-id]:not(.deleted)');
+async function svCheckDeleted(name, gen) {
+  const sel = `.msg[data-src="${CSS.escape(srcKey('starvios', name))}"][data-id]:not(.deleted)`;
+  const shown = feed.querySelector(sel);
   if (!shown || !shown._msg) return;
   const since = shown._msg.time.toISOString();
-  const rows = await svGet(`live_chat_messages?select=id&stream_id=eq.${svStream.id}`
+  const rows = await svGet(`live_chat_messages?select=id&stream_id=eq.${svStreams[name].id}`
     + `&is_deleted=eq.true&created_at=gte.${encodeURIComponent(since)}`);
   if (gen !== svGen) return;
   rows.forEach((r) => markDeleted('starvios', r.id));
 }
 
-function handleStarviosMsg(d) {
+function handleStarviosMsg(d, channel) {
   if (!d || !d.id) return;
-  if (d.created_at > svLast) svLast = d.created_at;
+  const s = svStreams[channel];
+  if (s && d.created_at > s.last) s.last = d.created_at;
   if (svSeen.has(d.id)) return;
   svSeen.add(d.id);
   if (svSeen.size > 3000) svSeen.delete(svSeen.values().next().value);
@@ -864,7 +931,7 @@ function handleStarviosMsg(d) {
   const body = d.body || '';
 
   if (d.kind && d.kind !== 'chat' && SV_EVENTS[d.kind]) {
-    addSystem('starvios', `${user} ${SV_EVENTS[d.kind]}${body ? ' — ' + body : ''}`, true);
+    addSystem('starvios', `${user} ${SV_EVENTS[d.kind]}${body ? ' — ' + body : ''}`, true, channel);
     return;
   }
 
@@ -874,6 +941,7 @@ function handleStarviosMsg(d) {
 
   addMessage({
     platform: 'starvios',
+    channel,
     id: d.id,
     userId: d.user_id,
     user,
@@ -950,19 +1018,19 @@ async function svAuthed(method, path, body, extraHeaders) {
   return j;
 }
 
-function svRequireStream() {
-  if (!svStream) throw new Error('Aún no hay conexión con el directo de Starvios.');
-  return svStream;
+function svRequireStream(name) {
+  if (!svStreams[name]) throw new Error(`Aún no hay conexión con el directo de Starvios ${name}.`);
+  return svStreams[name];
 }
 
-async function starviosSend(body, replyId) {
-  const s = svRequireStream();
+async function starviosSend(name, body, replyId) {
+  const s = svRequireStream(name);
   if (replyId) await svAuthed('POST', 'rpc/send_live_reply', { _stream_id: s.id, _body: body, _coins: 0, _reply_to: replyId });
   else await svAuthed('POST', 'rpc/send_live_message', { _stream_id: s.id, _body: body, _coins: 0 });
 }
 
-async function starviosDelete(messageId) {
-  const s = svRequireStream();
+async function starviosDelete(name, messageId) {
+  const s = svRequireStream(name);
   const rows = await svAuthed('PATCH',
     `live_chat_messages?id=eq.${encodeURIComponent(messageId)}&stream_id=eq.${s.id}&select=id`,
     { is_deleted: true, deleted_by: svAuth.userId },
@@ -971,8 +1039,8 @@ async function starviosDelete(messageId) {
   markDeleted('starvios', messageId);
 }
 
-async function starviosBan(userId, minutes) {
-  const s = svRequireStream();
+async function starviosBan(name, userId, minutes) {
+  const s = svRequireStream(name);
   await svAuthed('POST', 'rpc/moderate_chat_user',
     { _channel: s.channelId, _user: userId, _minutes: minutes || SV_BAN_MINUTES, _reason: 'Chat M' });
 }
@@ -980,24 +1048,25 @@ async function starviosBan(userId, minutes) {
 /* =========================================================
    Plataformas: qué se puede hacer en cada una
    ========================================================= */
+// ch = canal donde actuar; m.channel = canal del mensaje
 const PROVIDERS = {
   twitch: {
     logged: () => !!auth,
-    send: (text, reply) => twitchSend(text, reply && reply.id),
-    del: (m) => twitchDelete(m.id),
-    ban: (m, minutes) => twitchBan(m.userId, minutes ? minutes * 60 : null),
+    send: (ch, text, reply) => twitchSend(ch, text, reply && reply.id),
+    del: (m) => twitchDelete(m.channel, m.id),
+    ban: (m, minutes) => twitchBan(m.channel, m.userId, minutes ? minutes * 60 : null),
   },
   kick: {
     logged: () => !!kickAuth,
-    send: (text, reply) => kickSend(text, reply && reply.id),
+    send: (ch, text, reply) => kickSend(ch, text, reply && reply.id),
     del: (m) => kickDelete(m.id),
-    ban: (m, minutes) => kickBan(m.userId, minutes),
+    ban: (m, minutes) => kickBan(m.channel, m.userId, minutes),
   },
   starvios: {
     logged: () => !!svAuth,
-    send: (text, reply) => starviosSend(text, reply && reply.id),
-    del: (m) => starviosDelete(m.id),
-    ban: (m, minutes) => starviosBan(m.userId, minutes),
+    send: (ch, text, reply) => starviosSend(ch, text, reply && reply.id),
+    del: (m) => starviosDelete(m.channel, m.id),
+    ban: (m, minutes) => starviosBan(m.channel, m.userId, minutes),
   },
 };
 
@@ -1012,7 +1081,7 @@ function openActions(m) {
   current = m;
   const plat = $('#act-platform');
   plat.className = 'badge-platform ' + m.platform;
-  plat.textContent = PLATFORM_NAMES[m.platform];
+  plat.textContent = `${PLATFORM_NAMES[m.platform]} · ${m.channel}`;
   $('#act-user').textContent = m.user;
   $('#act-text').textContent = m.parts.map((p) => p.text || p.alt).join('');
 
@@ -1045,14 +1114,14 @@ actions.addEventListener('click', async (e) => {
   if (act === 'reply') {
     actions.close();
     replyTarget = m;
-    $('#target').value = m.platform;
+    $('#target').value = srcKey(m.platform, m.channel);
     updateComposer();
-    $('#reply-text').textContent = `↪ Respondiendo a @${m.user} en ${PLATFORM_NAMES[m.platform]}`;
+    $('#reply-text').textContent = `↪ Respondiendo a @${m.user} en ${PLATFORM_NAMES[m.platform]} · ${m.channel}`;
     $('#reply-bar').hidden = false;
     $('#input').focus();
     return;
   }
-  const name = PLATFORM_NAMES[m.platform];
+  const name = `${PLATFORM_NAMES[m.platform]} (${m.channel})`;
   if (act === 'ban' && !confirm(`¿Banear permanentemente a ${m.user} de ${name}?`)) return;
 
   const p = PROVIDERS[m.platform];
@@ -1079,19 +1148,24 @@ function clearReply() {
 /* =========================================================
    Escribir mensajes
    ========================================================= */
-// Muestra en el selector solo las plataformas con sesión iniciada
+// El selector ofrece cada canal de las plataformas con sesión iniciada
 function updateComposer() {
   const select = $('#target');
-  const logged = PLATFORMS.filter((p) => PROVIDERS[p].logged());
+  const targets = sources().filter((s) => PROVIDERS[s.p].logged());
   const wanted = select.value || cfg.sendTarget;
-  select.replaceChildren(...logged.map((p) => new Option(PLATFORM_NAMES[p], p)));
-  if (logged.includes(wanted)) select.value = wanted;
+  select.replaceChildren(...targets.map((s) => new Option(srcLabel(s.p, s.ch), s.key)));
+  if (targets.some((s) => s.key === wanted)) select.value = wanted;
 
-  $('#send-form').hidden = !logged.length;
-  $('#login-cta').hidden = !!logged.length;
-  select.className = 'target ' + select.value;
-  $('#input').placeholder = `Escribe en el chat de ${PLATFORM_NAMES[select.value] || ''}…`;
-  if (!logged.length || (replyTarget && replyTarget.platform !== select.value)) clearReply();
+  const anyLogged = PLATFORMS.some((p) => PROVIDERS[p].logged());
+  $('#send-form').hidden = !targets.length;
+  $('#login-cta').hidden = !!targets.length;
+  $('#login-cta').textContent = anyLogged
+    ? 'Escribe en ⚙ Ajustes los canales de la plataforma donde iniciaste sesión'
+    : 'Inicia sesión en ⚙ Ajustes para escribir y moderar';
+  const [p, ch] = select.value ? splitKey(select.value) : ['', ''];
+  select.className = 'target ' + p;
+  $('#input').placeholder = p ? `Escribe en ${PLATFORM_NAMES[p]} · ${ch}…` : '';
+  if (!targets.length || (replyTarget && srcKey(replyTarget.platform, replyTarget.channel) !== select.value)) clearReply();
 }
 
 $('#target').addEventListener('change', () => {
@@ -1110,7 +1184,8 @@ $('#send-form').addEventListener('submit', async (e) => {
   const btn = $('#send-btn');
   btn.disabled = true;
   try {
-    await PROVIDERS[$('#target').value].send(text, replyTarget);
+    const [p, ch] = splitKey($('#target').value);
+    await PROVIDERS[p].send(ch, text, replyTarget);
     input.value = '';
     clearReply();
   } catch (err) {
@@ -1167,16 +1242,18 @@ settings.addEventListener('close', () => {
     else if (el.type === 'range') cfg[el.name] = Number(el.value);
     else cfg[el.name] = el.value.trim();
   }
+  // Olvida los canales ocultos que ya no existen
+  const keys = new Set(sources().map((s) => s.key));
+  cfg.hidden = cfg.hidden.filter((k) => keys.has(k));
   saveCfg();
   applyView();
   updateWakeLock();
 
-  if (before.twitchChannel !== cfg.twitchChannel) { twitchRoomId = null; connectTwitch(); }
+  if (before.twitchChannel !== cfg.twitchChannel) connectTwitch();
   if (['kickChannel', 'kickChatroomId'].some((k) => before[k] !== cfg[k])) connectKick();
   if (before.starviosChannel !== cfg.starviosChannel) connectStarvios();
   if (before.twitchClientId !== cfg.twitchClientId && auth) twitchLogout();
   if (before.kickClientId !== cfg.kickClientId && kickAuth) kickLogout();
-  if (before.kickChannel !== cfg.kickChannel) kickBroadcaster = null;
 });
 
 // Guarda lo escrito en los campos antes de salir hacia la página de inicio de sesión
@@ -1206,16 +1283,6 @@ $('#starvios-login').addEventListener('click', async (e) => {
 });
 $('#starvios-logout').addEventListener('click', () => starviosLogout());
 $('#btn-clear').addEventListener('click', () => { feed.replaceChildren(); });
-
-// Tocar un chip muestra u oculta esa plataforma
-for (const chip of document.querySelectorAll('.chip')) {
-  chip.addEventListener('click', () => {
-    const key = showKey(chip.dataset.platform);
-    cfg[key] = !cfg[key];
-    saveCfg();
-    applyView();
-  });
-}
 
 /* =========================================================
    Pantalla siempre encendida
@@ -1251,7 +1318,7 @@ async function init() {
   connectStarvios();
   updateWakeLock();
 
-  if (!cfg.twitchChannel && !cfg.kickChannel && !cfg.starviosChannel) {
+  if (!sources().length) {
     addSystem('twitch', '¡Bienvenido a Chat M! Toca ⚙ para poner tus canales de Twitch, Kick y Starvios.', true);
   }
 

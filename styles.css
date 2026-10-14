@@ -103,9 +103,13 @@ body.hide-time .msg .time { display: none; }
 .pill.subscriber  { background: #6441a5; }
 .pill.og          { background: #c58e00; }
 
-body.hide-twitch .msg.twitch,
-body.hide-kick .msg.kick,
-body.hide-starvios .msg.starvios { display: none; }
+/* Etiqueta del canal: solo cuando alguna plataforma tiene varios canales */
+.msg .chan {
+  display: none; margin-right: 6px;
+  font-size: .65em; font-weight: 700; color: var(--muted);
+  vertical-align: .15em;
+}
+body.show-channel .msg .chan { display: inline; }
 
 #jump {
   position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%);

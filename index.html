@@ -16,17 +16,8 @@
 <body>
   <header class="topbar">
     <div class="brand">Chat <b>M</b></div>
-    <div class="chips">
-      <button class="chip twitch" id="chip-twitch" data-platform="twitch" aria-pressed="true">
-        <span class="dot"></span><span class="label">Twitch</span><span class="state" id="st-twitch">—</span>
-      </button>
-      <button class="chip kick" id="chip-kick" data-platform="kick" aria-pressed="true">
-        <span class="dot"></span><span class="label">Kick</span><span class="state" id="st-kick">—</span>
-      </button>
-      <button class="chip starvios" id="chip-starvios" data-platform="starvios" aria-pressed="true">
-        <span class="dot"></span><span class="label">Starvios</span><span class="state" id="st-starvios">—</span>
-      </button>
-    </div>
+    <!-- Un botón por canal; se generan desde app.js -->
+    <div class="chips" id="chips"></div>
     <button class="icon-btn" id="btn-settings" aria-label="Ajustes">⚙</button>
   </header>
 
@@ -73,14 +64,15 @@
     <form class="sheet" id="settings-form" method="dialog">
       <h2>Ajustes</h2>
 
-      <label>Canal de Twitch
-        <input name="twitchChannel" placeholder="tu_canal" autocapitalize="off" spellcheck="false">
+      <p class="note">Puedes poner varios canales por plataforma, separados por coma.</p>
+      <label>Canales de Twitch
+        <input name="twitchChannel" placeholder="tu_canal, otro_canal" autocapitalize="off" spellcheck="false">
       </label>
-      <label>Canal de Kick
-        <input name="kickChannel" placeholder="tu_canal" autocapitalize="off" spellcheck="false">
+      <label>Canales de Kick
+        <input name="kickChannel" placeholder="tu_canal, otro_canal" autocapitalize="off" spellcheck="false">
       </label>
-      <label>Canal de Starvios
-        <input name="starviosChannel" placeholder="tu_canal" autocapitalize="off" spellcheck="false">
+      <label>Canales de Starvios
+        <input name="starviosChannel" placeholder="tu_canal, otro_canal" autocapitalize="off" spellcheck="false">
       </label>
 
       <p class="note">Para escribir y moderar inicia sesión abajo. Las claves y sesiones se guardan
@@ -136,7 +128,7 @@
 
       <details>
         <summary>Avanzado (Kick)</summary>
-        <label>ID del chatroom de Kick (si no se detecta solo)
+        <label>ID del chatroom de Kick (si no se detecta solo; solo con un canal de Kick)
           <input name="kickChatroomId" inputmode="numeric" placeholder="automático">
         </label>
         <p class="note">Ábrelo en el navegador: <code>kick.com/api/v2/channels/TU_CANAL</code> y busca <code>"chatroom":{"id":…</code></p>

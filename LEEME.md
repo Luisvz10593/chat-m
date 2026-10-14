@@ -8,7 +8,12 @@ Chat unificado de **Twitch + Kick + Starvios** para la tablet, pensado para usar
   (borde morado = Twitch, verde = Kick, amarillo = Starvios).
 - Emotes (Twitch y Kick), insignias (STREAMER / MOD / VIP / SUB), avisos de subs, raids y donaciones de Starvies.
 - Resalta los mensajes que te mencionan.
-- Toca el nombre de una plataforma arriba para ocultarla o mostrarla.
+- **Varios canales por plataforma:** en ⚙ escríbelos separados por coma
+  (`canal1, canal2`). Con una sola cuenta por plataforma moderas todos los canales
+  donde esa cuenta sea dueña o moderadora.
+- Arriba hay un botón por canal: tócalo para ocultarlo o mostrarlo.
+- Cuando hay varios canales, cada mensaje muestra `#canal` y el selector para escribir
+  te deja elegir plataforma y canal.
 - Toca un mensaje para **responder, mencionar, borrar, dar timeout o banear** en su plataforma.
 - Escribe en cualquier plataforma donde iniciaste sesión (selector junto al campo de texto).
 - Mantiene la pantalla de la tablet encendida.
