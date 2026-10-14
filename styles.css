@@ -128,9 +128,15 @@ body.hide-starvios .msg.starvios { display: none; }
 #send-form { display: flex; gap: 8px; align-items: center; }
 #send-form[hidden] { display: none; }
 .target {
-  padding: 4px 10px; border-radius: 8px; font-size: 13px; font-weight: 700;
+  min-height: 48px; padding: 0 10px; border-radius: 12px; border: 0;
+  font: inherit; font-size: 15px; font-weight: 700;
+  background: var(--panel-2); color: var(--text);
 }
-.target.twitch { background: var(--twitch); }
+.target.twitch { background: var(--twitch); color: #fff; }
+.target.kick { background: var(--kick); color: #000; }
+.target.starvios { background: var(--starvios); color: #000; }
+.stack { display: flex; flex-direction: column; gap: 10px; }
+.stack[hidden] { display: none; }
 #input {
   flex: 1; min-height: 48px; padding: 0 14px;
   border-radius: 12px; border: 1px solid var(--line);
@@ -186,7 +192,7 @@ code { background: var(--bg); padding: 1px 6px; border-radius: 4px; word-break: 
 }
 fieldset {
   border: 1px solid var(--line); border-radius: 12px;
-  padding: 12px; margin: 0;
+  padding: 12px; margin: 0; min-width: 0;
   display: flex; flex-direction: column; gap: 10px;
 }
 legend { padding: 0 6px; color: var(--muted); }

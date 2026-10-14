@@ -40,11 +40,11 @@
       <button class="icon-btn small" id="reply-cancel" aria-label="Cancelar respuesta">✕</button>
     </div>
     <form id="send-form" autocomplete="off">
-      <span class="target twitch">Twitch</span>
-      <input id="input" maxlength="500" placeholder="Escribe en el chat de Twitch…" enterkeyhint="send">
+      <select id="target" class="target" aria-label="Plataforma donde escribir"></select>
+      <input id="input" maxlength="500" placeholder="Escribe en el chat…" enterkeyhint="send">
       <button type="submit" id="send-btn">Enviar</button>
     </form>
-    <button id="login-cta" class="cta" hidden>Inicia sesión con Twitch para escribir y moderar</button>
+    <button id="login-cta" class="cta" hidden>Inicia sesión en ⚙ Ajustes para escribir y moderar</button>
   </footer>
 
   <!-- Acciones sobre un mensaje -->
@@ -83,16 +83,48 @@
         <input name="starviosChannel" placeholder="tu_canal" autocapitalize="off" spellcheck="false">
       </label>
 
+      <p class="note">Para escribir y moderar inicia sesión abajo. Las claves y sesiones se guardan
+        <b>solo en este dispositivo</b>.<br>
+        URL de redirección para tus apps de Twitch y Kick: <code id="redirect-url"></code></p>
+
       <fieldset>
-        <legend>Cuenta de Twitch (para escribir y moderar)</legend>
+        <legend>Cuenta de Twitch</legend>
         <label>Client ID de tu app de Twitch
           <input name="twitchClientId" placeholder="abc123…" autocapitalize="off" spellcheck="false">
         </label>
-        <p class="note">Registra esta URL como <i>OAuth Redirect URL</i> en dev.twitch.tv:<br><code id="redirect-url"></code></p>
         <div class="row">
-          <span id="auth-status" class="note">Sin sesión</span>
-          <button type="button" id="btn-login">Iniciar sesión</button>
-          <button type="button" id="btn-logout" hidden>Cerrar sesión</button>
+          <span id="twitch-auth-status" class="note">Sin sesión</span>
+          <button type="button" id="twitch-login">Iniciar sesión</button>
+          <button type="button" id="twitch-logout" hidden>Cerrar sesión</button>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Cuenta de Kick</legend>
+        <label>Client ID de tu app de Kick
+          <input name="kickClientId" autocapitalize="off" spellcheck="false">
+        </label>
+        <label>Client Secret de tu app de Kick
+          <input name="kickClientSecret" type="password" autocomplete="off" autocapitalize="off" spellcheck="false">
+        </label>
+        <div class="row">
+          <span id="kick-auth-status" class="note">Sin sesión</span>
+          <button type="button" id="kick-login">Iniciar sesión</button>
+          <button type="button" id="kick-logout" hidden>Cerrar sesión</button>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Cuenta de Starvios</legend>
+        <div id="sv-credentials" class="stack">
+          <label>Correo <input id="sv-email" type="email" autocomplete="username" autocapitalize="off" spellcheck="false"></label>
+          <label>Contraseña <input id="sv-pass" type="password" autocomplete="current-password"></label>
+          <p class="note">La contraseña solo se envía a Starvios y no se guarda.</p>
+        </div>
+        <div class="row">
+          <span id="starvios-auth-status" class="note">Sin sesión</span>
+          <button type="button" id="starvios-login">Iniciar sesión</button>
+          <button type="button" id="starvios-logout" hidden>Cerrar sesión</button>
         </div>
       </fieldset>
 

@@ -9,10 +9,13 @@ Chat unificado de **Twitch + Kick + Starvios** para la tablet, pensado para usar
 - Emotes (Twitch y Kick), insignias (STREAMER / MOD / VIP / SUB), avisos de subs, raids y donaciones de Starvies.
 - Resalta los mensajes que te mencionan.
 - Toca el nombre de una plataforma arriba para ocultarla o mostrarla.
-- Toca un mensaje para **responder, mencionar, borrar, dar timeout o banear** (por ahora solo en Twitch).
+- Toca un mensaje para **responder, mencionar, borrar, dar timeout o banear** en su plataforma.
+- Escribe en cualquier plataforma donde iniciaste sesión (selector junto al campo de texto).
 - Mantiene la pantalla de la tablet encendida.
 
-Pendiente: responder y moderar en Kick y en Starvios.
+> **Privacidad:** los Client ID, el Client Secret de Kick y las sesiones se guardan
+> **solo en el dispositivo** donde los escribes (no están en el código ni en GitHub).
+> La contraseña de Starvios no se guarda nunca: solo se usa para iniciar sesión.
 
 ---
 
@@ -43,6 +46,23 @@ Para leer el chat no hace falta iniciar sesión.
 > Para que funcionen borrar, timeout y ban, la cuenta con la que inicias sesión
 > debe ser el dueño del canal o moderador.
 
+## 2b. Registrar la app en Kick (para escribir y moderar en Kick)
+
+1. En kick.com entra a tu perfil → **Settings → Developer** y crea una app.
+2. **Redirect URL:** la misma URL que aparece en ⚙ Ajustes
+   (`https://luisvz10593.github.io/chat-m/`, y `http://localhost:8080/` si pruebas en la PC).
+3. Activa los permisos: **Read user info**, **Read channel info**, **Write to chat**,
+   **Moderation: ban users** y **Moderation: manage chat messages**.
+4. Copia el **Client ID** y el **Client Secret** y pégalos **en la tablet**, en
+   ⚙ Ajustes → Cuenta de Kick. Toca **Iniciar sesión**.
+
+## 2c. Iniciar sesión en Starvios
+
+En ⚙ Ajustes → Cuenta de Starvios escribe tu correo y contraseña de Starvios y toca
+**Iniciar sesión**. Solo funciona con cuentas de correo y contraseña (no con
+inicio de sesión de Google u otras redes). Para moderar, tu cuenta debe ser la
+dueña del canal o moderadora.
+
 ## 3. Publicarla para la tablet (GitHub Pages, gratis)
 
 1. Crea un repositorio en GitHub llamado `chat-m` y sube los archivos de esta carpeta.
@@ -66,8 +86,9 @@ se tachan unos segundos después.
 
 Starvios no tiene API documentada. Chat M usa los mismos datos públicos que
 usa su página web (la tabla de mensajes del directo), consultándolos cada
-2 segundos. Si Starvios cambia su web, esta parte podría dejar de funcionar
-hasta actualizarla.
+2 segundos. Para escribir y moderar usa las mismas funciones que su web
+(`send_live_message`, `moderate_chat_user`). Si Starvios cambia su web, esta
+parte podría dejar de funcionar hasta actualizarla.
 
 ## Kick: si no se detecta el chat
 

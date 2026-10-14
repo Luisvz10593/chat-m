@@ -22,7 +22,10 @@ const DEFAULTS = {
   kickChannel: '',
   starviosChannel: '',
   twitchClientId: '',
+  kickClientId: '',
+  kickClientSecret: '', // solo vive en este dispositivo
   kickChatroomId: '',
+  sendTarget: 'twitch',
   fontSize: 19,
   showTime: true,
   wakeLock: true,
@@ -611,6 +614,158 @@ function kickParts(text) {
 }
 
 /* =========================================================
+   KICK — cuenta (OAuth 2.1 + PKCE) y API pública oficial
+   El Client Secret lo escribe el usuario en Ajustes y solo
+   se guarda en este dispositivo (localStorage).
+   ========================================================= */
+const KICK_SCOPES = 'user:read channel:read chat:write moderation:ban moderation:chat_message:manage';
+const KICK_API = 'https://api.kick.com/public/v1/';
+let kickAuth = store.get('kickAuth', null); // { access, refresh, expiresAt, userId, name }
+let kickBroadcaster = null;                 // { slug, id }
+
+const b64url = (bytes) => btoa(String.fromCharCode(...new Uint8Array(bytes)))
+  .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const randomString = (n) => b64url(crypto.getRandomValues(new Uint8Array(n)));
+
+async function kickLogin() {
+  if (!cfg.kickClientId || !cfg.kickClientSecret) {
+    toast('Escribe el Client ID y el Client Secret de Kick en Ajustes.', true);
+    return;
+  }
+  if (!window.crypto || !crypto.subtle) {
+    toast('Para iniciar sesión la app debe abrirse desde https:// o http://localhost.', true);
+    return;
+  }
+  const verifier = randomString(48);
+  const challenge = b64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+  const state = 'kick.' + randomString(12);
+  store.set('kickPkce', { verifier, state });
+  location.href = 'https://id.kick.com/oauth/authorize?' + new URLSearchParams({
+    response_type: 'code',
+    client_id: cfg.kickClientId,
+    redirect_uri: redirectUrl(),
+    scope: KICK_SCOPES,
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    state,
+  });
+}
+
+function kickLogout(silent) {
+  kickAuth = null;
+  kickBroadcaster = null;
+  store.set('kickAuth', null);
+  updateAuthUi();
+  updateComposer();
+  if (!silent) toast('Sesión de Kick cerrada.');
+}
+
+async function kickTokenRequest(params) {
+  const r = await fetch('https://id.kick.com/oauth/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ client_id: cfg.kickClientId, client_secret: cfg.kickClientSecret, ...params }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.access_token) {
+    throw new Error(j.error_description || j.message || `Kick rechazó el inicio de sesión (${r.status}).`);
+  }
+  kickAuth = {
+    ...(kickAuth || {}),
+    access: j.access_token,
+    refresh: j.refresh_token || (kickAuth && kickAuth.refresh),
+    expiresAt: Date.now() + (j.expires_in || 3600) * 1000,
+  };
+  store.set('kickAuth', kickAuth);
+}
+
+async function handleKickRedirect() {
+  const q = new URLSearchParams(location.search);
+  const state = q.get('state') || '';
+  if (!state.startsWith('kick.')) return;
+  history.replaceState(null, '', location.pathname + location.hash);
+  const pkce = store.get('kickPkce', null);
+  store.set('kickPkce', null);
+  if (q.get('error')) { toast('Kick rechazó el inicio de sesión: ' + (q.get('error_description') || q.get('error')), true); return; }
+  if (!pkce || pkce.state !== state || !q.get('code')) { toast('El inicio de sesión de Kick no coincide; inténtalo otra vez.', true); return; }
+
+  try {
+    await kickTokenRequest({
+      grant_type: 'authorization_code',
+      code: q.get('code'),
+      redirect_uri: redirectUrl(),
+      code_verifier: pkce.verifier,
+    });
+    const me = await kickApi('GET', 'users');
+    const u = me.data && me.data[0];
+    kickAuth.userId = u && u.user_id;
+    kickAuth.name = u && u.name;
+    store.set('kickAuth', kickAuth);
+    toast('Sesión de Kick iniciada como ' + (kickAuth.name || '?'));
+  } catch (err) {
+    kickLogout(true);
+    toast(err.message, true);
+  } finally {
+    updateAuthUi();
+    updateComposer();
+  }
+}
+
+async function kickApi(method, path, body, retried) {
+  if (!kickAuth) throw new Error('Inicia sesión con Kick primero.');
+  if (Date.now() > kickAuth.expiresAt - 60000 && kickAuth.refresh) {
+    await kickTokenRequest({ grant_type: 'refresh_token', refresh_token: kickAuth.refresh });
+  }
+  const r = await fetch(KICK_API + path, {
+    method,
+    headers: { Authorization: 'Bearer ' + kickAuth.access, 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (r.status === 401) {
+    if (!retried && kickAuth.refresh) {
+      try {
+        await kickTokenRequest({ grant_type: 'refresh_token', refresh_token: kickAuth.refresh });
+        return kickApi(method, path, body, true);
+      } catch { /* cae al cierre de sesión */ }
+    }
+    kickLogout(true);
+    throw new Error('Tu sesión de Kick expiró. Inicia sesión de nuevo.');
+  }
+  const text = await r.text();
+  let j = {};
+  try { j = text ? JSON.parse(text) : {}; } catch { /* respuesta vacía o no JSON */ }
+  if (!r.ok) throw new Error(j.message || 'Kick respondió con error ' + r.status);
+  return j;
+}
+
+async function kickBroadcasterId() {
+  const slug = cfg.kickChannel.trim().toLowerCase();
+  if (!slug) throw new Error('Escribe tu canal de Kick en Ajustes.');
+  if (kickBroadcaster && kickBroadcaster.slug === slug) return kickBroadcaster.id;
+  const j = await kickApi('GET', 'channels?slug=' + encodeURIComponent(slug));
+  const ch = j.data && j.data[0];
+  if (!ch) throw new Error('Kick no encontró el canal ' + slug);
+  kickBroadcaster = { slug, id: ch.broadcaster_user_id };
+  return kickBroadcaster.id;
+}
+
+async function kickSend(content, replyId) {
+  const body = { type: 'user', broadcaster_user_id: await kickBroadcasterId(), content };
+  if (replyId) body.reply_to_message_id = replyId;
+  await kickApi('POST', 'chat', body);
+}
+
+async function kickDelete(messageId) {
+  await kickApi('DELETE', 'chat/' + encodeURIComponent(messageId));
+}
+
+async function kickBan(userId, minutes) {
+  const body = { broadcaster_user_id: await kickBroadcasterId(), user_id: Number(userId), reason: 'Chat M' };
+  if (minutes) body.duration = minutes;
+  await kickApi('POST', 'moderation/bans', body);
+}
+
+/* =========================================================
    STARVIOS — lectura por su API pública (Supabase)
    Starvios no tiene API documentada: estos son los mismos
    datos públicos que usa su web, así que pueden cambiar.
@@ -732,6 +887,121 @@ function handleStarviosMsg(d) {
 }
 
 /* =========================================================
+   STARVIOS — cuenta y moderación
+   El correo y la contraseña solo se envían a Starvios para
+   iniciar sesión; se guarda la sesión, no la contraseña.
+   ========================================================= */
+const SV_AUTH = 'https://naiijcvngtkkocligwvk.supabase.co/auth/v1/token?grant_type=';
+const SV_BAN_MINUTES = 5256000; // lo que usa la web de Starvios para "expulsar" (~10 años)
+let svAuth = store.get('svAuth', null); // { access, refresh, expiresAt, userId, email }
+
+async function svTokenRequest(grant, body) {
+  const r = await fetch(SV_AUTH + grant, {
+    method: 'POST',
+    headers: { apikey: SV_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.access_token) {
+    const msg = j.error_description || j.msg || j.message || '';
+    throw new Error(/invalid/i.test(msg) ? 'Correo o contraseña incorrectos.' : 'Starvios rechazó el inicio de sesión. ' + msg);
+  }
+  svAuth = {
+    access: j.access_token,
+    refresh: j.refresh_token,
+    expiresAt: Date.now() + (j.expires_in || 3600) * 1000,
+    userId: j.user && j.user.id,
+    email: j.user && j.user.email,
+  };
+  store.set('svAuth', svAuth);
+}
+
+async function starviosLogin(email, password) {
+  await svTokenRequest('password', { email, password });
+  updateAuthUi();
+  updateComposer();
+  toast('Sesión de Starvios iniciada.');
+}
+
+function starviosLogout(silent) {
+  svAuth = null;
+  store.set('svAuth', null);
+  updateAuthUi();
+  updateComposer();
+  if (!silent) toast('Sesión de Starvios cerrada.');
+}
+
+async function svAuthed(method, path, body, extraHeaders) {
+  if (!svAuth) throw new Error('Inicia sesión con Starvios primero.');
+  if (Date.now() > svAuth.expiresAt - 60000) {
+    try { await svTokenRequest('refresh_token', { refresh_token: svAuth.refresh }); }
+    catch { starviosLogout(true); throw new Error('Tu sesión de Starvios expiró. Inicia sesión de nuevo.'); }
+  }
+  const r = await fetch(SV_URL + path, {
+    method,
+    headers: { apikey: SV_KEY, Authorization: 'Bearer ' + svAuth.access, 'Content-Type': 'application/json', ...extraHeaders },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await r.text();
+  let j = null;
+  try { j = text ? JSON.parse(text) : null; } catch { /* sin cuerpo */ }
+  if (r.status === 401) { starviosLogout(true); throw new Error('Tu sesión de Starvios expiró. Inicia sesión de nuevo.'); }
+  if (!r.ok) throw new Error((j && (j.message || j.hint)) || 'Starvios respondió con error ' + r.status);
+  return j;
+}
+
+function svRequireStream() {
+  if (!svStream) throw new Error('Aún no hay conexión con el directo de Starvios.');
+  return svStream;
+}
+
+async function starviosSend(body, replyId) {
+  const s = svRequireStream();
+  if (replyId) await svAuthed('POST', 'rpc/send_live_reply', { _stream_id: s.id, _body: body, _coins: 0, _reply_to: replyId });
+  else await svAuthed('POST', 'rpc/send_live_message', { _stream_id: s.id, _body: body, _coins: 0 });
+}
+
+async function starviosDelete(messageId) {
+  const s = svRequireStream();
+  const rows = await svAuthed('PATCH',
+    `live_chat_messages?id=eq.${encodeURIComponent(messageId)}&stream_id=eq.${s.id}&select=id`,
+    { is_deleted: true, deleted_by: svAuth.userId },
+    { Prefer: 'return=representation' });
+  if (!rows || !rows.length) throw new Error('No se pudo borrar: tu cuenta no es moderadora de este canal.');
+  markDeleted('starvios', messageId);
+}
+
+async function starviosBan(userId, minutes) {
+  const s = svRequireStream();
+  await svAuthed('POST', 'rpc/moderate_chat_user',
+    { _channel: s.channelId, _user: userId, _minutes: minutes || SV_BAN_MINUTES, _reason: 'Chat M' });
+}
+
+/* =========================================================
+   Plataformas: qué se puede hacer en cada una
+   ========================================================= */
+const PROVIDERS = {
+  twitch: {
+    logged: () => !!auth,
+    send: (text, reply) => twitchSend(text, reply && reply.id),
+    del: (m) => twitchDelete(m.id),
+    ban: (m, minutes) => twitchBan(m.userId, minutes ? minutes * 60 : null),
+  },
+  kick: {
+    logged: () => !!kickAuth,
+    send: (text, reply) => kickSend(text, reply && reply.id),
+    del: (m) => kickDelete(m.id),
+    ban: (m, minutes) => kickBan(m.userId, minutes),
+  },
+  starvios: {
+    logged: () => !!svAuth,
+    send: (text, reply) => starviosSend(text, reply && reply.id),
+    del: (m) => starviosDelete(m.id),
+    ban: (m, minutes) => starviosBan(m.userId, minutes),
+  },
+};
+
+/* =========================================================
    Acciones sobre mensajes
    ========================================================= */
 const actions = $('#actions');
@@ -746,18 +1016,10 @@ function openActions(m) {
   $('#act-user').textContent = m.user;
   $('#act-text').textContent = m.parts.map((p) => p.text || p.alt).join('');
 
-  const isTwitch = m.platform === 'twitch';
-  const canMod = isTwitch && !!auth;
+  const canMod = PROVIDERS[m.platform].logged();
   const note = $('#act-note');
-  if (!isTwitch) {
-    note.hidden = false;
-    note.textContent = `Responder y moderar en ${PLATFORM_NAMES[m.platform]} todavía no está disponible. Por ahora usa “Mencionar” para escribirle desde Twitch.`;
-  } else if (!auth) {
-    note.hidden = false;
-    note.textContent = 'Inicia sesión con Twitch (Ajustes) para responder y moderar.';
-  } else {
-    note.hidden = true;
-  }
+  note.hidden = canMod;
+  note.textContent = `Inicia sesión con ${PLATFORM_NAMES[m.platform]} en ⚙ Ajustes para responder y moderar.`;
 
   actions.querySelector('[data-act="reply"]').disabled = !canMod;
   actions.querySelector('[data-act="mention"]').disabled = false;
@@ -783,19 +1045,23 @@ actions.addEventListener('click', async (e) => {
   if (act === 'reply') {
     actions.close();
     replyTarget = m;
-    $('#reply-text').textContent = '↪ Respondiendo a @' + m.user;
+    $('#target').value = m.platform;
+    updateComposer();
+    $('#reply-text').textContent = `↪ Respondiendo a @${m.user} en ${PLATFORM_NAMES[m.platform]}`;
     $('#reply-bar').hidden = false;
     $('#input').focus();
     return;
   }
-  if (act === 'ban' && !confirm(`¿Banear permanentemente a ${m.user} de Twitch?`)) return;
+  const name = PLATFORM_NAMES[m.platform];
+  if (act === 'ban' && !confirm(`¿Banear permanentemente a ${m.user} de ${name}?`)) return;
 
+  const p = PROVIDERS[m.platform];
   btn.disabled = true;
   try {
-    if (act === 'delete') { await twitchDelete(m.id); toast('Mensaje borrado.'); }
-    if (act === 'timeout60') { await twitchBan(m.userId, 60); toast(`${m.user}: timeout de 1 min.`); }
-    if (act === 'timeout600') { await twitchBan(m.userId, 600); toast(`${m.user}: timeout de 10 min.`); }
-    if (act === 'ban') { await twitchBan(m.userId); toast(`${m.user} fue baneado.`); }
+    if (act === 'delete') { await p.del(m); toast('Mensaje borrado.'); }
+    if (act === 'timeout60') { await p.ban(m, 1); toast(`${m.user}: timeout de 1 min en ${name}.`); }
+    if (act === 'timeout600') { await p.ban(m, 10); toast(`${m.user}: timeout de 10 min en ${name}.`); }
+    if (act === 'ban') { await p.ban(m, null); toast(`${m.user} fue baneado de ${name}.`); }
     actions.close();
   } catch (err) {
     toast(err.message, true);
@@ -813,17 +1079,28 @@ function clearReply() {
 /* =========================================================
    Escribir mensajes
    ========================================================= */
+// Muestra en el selector solo las plataformas con sesión iniciada
 function updateComposer() {
-  const logged = !!auth;
-  $('#send-form').hidden = !logged;
-  $('#login-cta').hidden = logged;
-  if (!logged) clearReply();
+  const select = $('#target');
+  const logged = PLATFORMS.filter((p) => PROVIDERS[p].logged());
+  const wanted = select.value || cfg.sendTarget;
+  select.replaceChildren(...logged.map((p) => new Option(PLATFORM_NAMES[p], p)));
+  if (logged.includes(wanted)) select.value = wanted;
+
+  $('#send-form').hidden = !logged.length;
+  $('#login-cta').hidden = !!logged.length;
+  select.className = 'target ' + select.value;
+  $('#input').placeholder = `Escribe en el chat de ${PLATFORM_NAMES[select.value] || ''}…`;
+  if (!logged.length || (replyTarget && replyTarget.platform !== select.value)) clearReply();
 }
 
-$('#login-cta').addEventListener('click', () => {
-  if (cfg.twitchClientId) twitchLogin();
-  else openSettings();
+$('#target').addEventListener('change', () => {
+  cfg.sendTarget = $('#target').value;
+  saveCfg();
+  updateComposer();
 });
+
+$('#login-cta').addEventListener('click', openSettings);
 
 $('#send-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -833,7 +1110,7 @@ $('#send-form').addEventListener('submit', async (e) => {
   const btn = $('#send-btn');
   btn.disabled = true;
   try {
-    await twitchSend(text, replyTarget && replyTarget.id);
+    await PROVIDERS[$('#target').value].send(text, replyTarget);
     input.value = '';
     clearReply();
   } catch (err) {
@@ -862,9 +1139,17 @@ function openSettings() {
 }
 
 function updateAuthUi() {
-  $('#auth-status').textContent = auth ? 'Conectado como ' + auth.login : 'Sin sesión';
-  $('#btn-login').hidden = !!auth;
-  $('#btn-logout').hidden = !auth;
+  const rows = [
+    ['twitch', auth && auth.login],
+    ['kick', kickAuth && (kickAuth.name || 'tu cuenta')],
+    ['starvios', svAuth && (svAuth.email || 'tu cuenta')],
+  ];
+  for (const [p, who] of rows) {
+    $(`#${p}-auth-status`).textContent = who ? 'Conectado como ' + who : 'Sin sesión';
+    $(`#${p}-login`).hidden = !!who;
+    $(`#${p}-logout`).hidden = !who;
+  }
+  $('#sv-credentials').hidden = !!svAuth;
 }
 
 // Vista previa del tamaño de letra mientras se mueve el control
@@ -890,16 +1175,36 @@ settings.addEventListener('close', () => {
   if (['kickChannel', 'kickChatroomId'].some((k) => before[k] !== cfg[k])) connectKick();
   if (before.starviosChannel !== cfg.starviosChannel) connectStarvios();
   if (before.twitchClientId !== cfg.twitchClientId && auth) twitchLogout();
+  if (before.kickClientId !== cfg.kickClientId && kickAuth) kickLogout();
+  if (before.kickChannel !== cfg.kickChannel) kickBroadcaster = null;
 });
 
-$('#btn-settings').addEventListener('click', openSettings);
-$('#btn-login').addEventListener('click', () => {
-  // Guarda el Client ID escrito antes de salir hacia Twitch
-  cfg.twitchClientId = form.elements.twitchClientId.value.trim();
+// Guarda lo escrito en los campos antes de salir hacia la página de inicio de sesión
+function keepTyped(...names) {
+  for (const n of names) cfg[n] = form.elements[n].value.trim();
   saveCfg();
-  twitchLogin();
+}
+
+$('#btn-settings').addEventListener('click', openSettings);
+$('#twitch-login').addEventListener('click', () => { keepTyped('twitchClientId', 'twitchChannel'); twitchLogin(); });
+$('#twitch-logout').addEventListener('click', twitchLogout);
+$('#kick-login').addEventListener('click', () => { keepTyped('kickClientId', 'kickClientSecret', 'kickChannel'); kickLogin(); });
+$('#kick-logout').addEventListener('click', () => kickLogout());
+$('#starvios-login').addEventListener('click', async (e) => {
+  const email = $('#sv-email').value.trim();
+  const pass = $('#sv-pass');
+  if (!email || !pass.value) { toast('Escribe tu correo y contraseña de Starvios.', true); return; }
+  e.target.disabled = true;
+  try {
+    await starviosLogin(email, pass.value);
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    pass.value = ''; // la contraseña nunca se guarda
+    e.target.disabled = false;
+  }
 });
-$('#btn-logout').addEventListener('click', twitchLogout);
+$('#starvios-logout').addEventListener('click', () => starviosLogout());
 $('#btn-clear').addEventListener('click', () => { feed.replaceChildren(); });
 
 // Tocar un chip muestra u oculta esa plataforma
@@ -938,6 +1243,7 @@ async function init() {
   applyView();
   updateAuthUi();
   await handleAuthRedirect();
+  await handleKickRedirect();
   if (auth) validateToken(auth.token); // revisa que el token siga vigente
 
   connectTwitch();
@@ -945,7 +1251,7 @@ async function init() {
   connectStarvios();
   updateWakeLock();
 
-  if (!cfg.twitchChannel && !cfg.kickChannel) {
+  if (!cfg.twitchChannel && !cfg.kickChannel && !cfg.starviosChannel) {
     addSystem('twitch', '¡Bienvenido a Chat M! Toca ⚙ para poner tus canales de Twitch, Kick y Starvios.', true);
   }
 
