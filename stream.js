@@ -28,6 +28,22 @@ let stSearchTimer = null;
 let stSearchSeq = 0;
 let stLoadSeq = 0;
 
+/*
+ * Kick no devuelve título ni tags fuera de directo. Guardamos en este
+ * dispositivo el último título/tags conocidos de cada canal (vistos en vivo
+ * o cambiados desde aquí) para mostrarlos como "último conocido".
+ */
+const lastKnown = (id) => (store.get('stLastKnown', {})[id] || {});
+function rememberKnown(id, data) {
+  const all = store.get('stLastKnown', {});
+  const prev = all[id] || {};
+  all[id] = {
+    title: data.title || prev.title || '',
+    tags: data.tags && data.tags.length ? data.tags : prev.tags || [],
+  };
+  store.set('stLastKnown', all);
+}
+
 const catKey = (c) => c.name.trim().toLowerCase();
 const favCats = () => store.get('favCats', []);
 const recentCats = () => store.get('recentCats', []);
@@ -161,6 +177,11 @@ async function loadAllCurrent(prefill) {
     try {
       const cur = await getCurrent(t);
       if (seq !== stLoadSeq) return;
+      rememberKnown(t.id, cur);
+      // Si la plataforma no los da (Kick fuera de directo), usa los últimos conocidos
+      const known = lastKnown(t.id);
+      if (!cur.title && known.title) { cur.title = known.title; cur.titleIsKnown = true; }
+      if ((!cur.tags || !cur.tags.length) && known.tags && known.tags.length) { cur.tags = known.tags; cur.tagsAreKnown = true; }
       stCurrent[t.id] = { status: 'ok', ...cur };
     } catch (e) {
       if (seq !== stLoadSeq) return;
@@ -282,12 +303,15 @@ function renderCards() {
       if (cur.live !== undefined) {
         card.append(el('span', 'st-live ' + (cur.live ? 'on' : 'off'), cur.live ? '● En vivo' : 'Fuera de directo'));
       }
-      card.append(el('p', 'st-card-title', cur.title || 'Sin título'));
+      const title = el('p', 'st-card-title', cur.title || 'Sin título');
+      if (cur.titleIsKnown) title.prepend(el('span', 'st-known', 'último conocido · '));
+      card.append(title);
       const cat = el('div', 'st-card-cat');
       cat.append(catImage({ name: cur.category || '?', img: cur.categoryImg }), el('span', null, cur.category || 'Sin categoría'));
       card.append(cat);
       if (cur.tags && cur.tags.length) {
         const tags = el('div', 'st-card-tags');
+        if (cur.tagsAreKnown) tags.append(el('span', 'st-known', 'último conocido ·'));
         tags.append(...cur.tags.map((x) => el('span', 'tag', x)));
         card.append(tags);
       } else {
@@ -693,7 +717,12 @@ async function applyPending() {
     const r = results[i];
     if (r.status === 'rejected') { fail++; setResult(t.id, 'fail', r.reason.message); }
     else if (r.value === 'omitido') setResult(t.id, 'skip', 'Sin cambios aplicables');
-    else { ok++; setResult(t.id, 'ok', 'Actualizado'); }
+    else {
+      ok++;
+      setResult(t.id, 'ok', 'Actualizado');
+      // Lo que acabas de aplicar pasa a ser lo último conocido de ese canal
+      rememberKnown(t.id, { title: changes.title, tags: changes.tags && (t.p === 'kick' ? changes.tags : cleanTags(changes.tags)) });
+    }
   });
 
   if (changes.cat && ok) { addRecent(changes.cat); renderFavs(); }

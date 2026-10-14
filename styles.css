@@ -279,6 +279,7 @@ section[hidden], #st-main[hidden], #st-review[hidden] { display: none; }
   border: 2px solid var(--muted); font-weight: 800; font-size: 14px;
 }
 .st-card[aria-pressed="true"] .st-check { background: #3ddc84; border-color: #3ddc84; color: #000; }
+.st-known { font-size: 12px; font-style: italic; color: var(--muted); }
 .st-live { align-self: flex-start; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
 .st-live.on { background: #e91916; color: #fff; }
 .st-live.off { background: var(--bg); color: var(--muted); }
