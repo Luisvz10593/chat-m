@@ -1,10 +1,10 @@
 // Service worker: permite instalar la app y abrirla aunque falle la red.
 // Usa "red primero" para que siempre cargue la versión más reciente.
-const CACHE = 'chatm-v5';
+const CACHE = 'chatm-v6';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'icon.svg'];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'no-cache' })))));
   self.skipWaiting();
 });
 
@@ -19,7 +19,9 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   e.respondWith(
-    fetch(e.request)
+    // "no-cache" pregunta siempre al servidor si hay versión nueva (GitHub Pages
+    // pide guardar los archivos 10 min y si no las actualizaciones tardan en llegar)
+    fetch(e.request, { cache: 'no-cache' })
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(e.request, copy));
