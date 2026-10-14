@@ -144,46 +144,89 @@
   </dialog>
 
   <!-- Directo: título, categoría y tags -->
-  <dialog id="stream">
-    <div class="sheet">
-      <h2>Directo</h2>
-      <div>
-        <p class="note">Aplicar en:</p>
-        <div id="st-targets" class="row"></div>
-      </div>
-      <p id="st-note" class="note warn" hidden></p>
-
-      <section class="stack">
-        <h3>Cambio rápido de categoría</h3>
-        <p class="note">Toca una categoría para cambiarla al momento en las plataformas marcadas.</p>
-        <div id="st-favs" class="cat-grid"></div>
-        <div id="st-recent-box" class="stack" hidden>
-          <h4>Recientes</h4>
-          <div id="st-recent" class="cat-grid"></div>
+  <dialog id="stream" class="stream-dialog">
+    <div class="sheet stream">
+      <header class="st-head">
+        <div>
+          <h2>Directo</h2>
+          <p class="note" id="st-subtitle">Título, categoría y tags de tus canales</p>
         </div>
-        <button type="button" id="st-edit-favs" class="link-btn">Quitar favoritas</button>
-      </section>
+        <button type="button" id="st-close" class="icon-btn" aria-label="Cerrar">✕</button>
+      </header>
 
-      <section class="stack">
-        <h3>Editar</h3>
-        <p id="st-current" class="note"></p>
-        <label>Título
-          <input id="st-title" maxlength="140" autocomplete="off">
-        </label>
-        <label>Categoría
-          <input id="st-cat-search" placeholder="Buscar categoría… (☆ = favorita)" autocomplete="off">
-        </label>
-        <div id="st-cat-selected"></div>
-        <div id="st-cat-results" class="cat-list"></div>
-        <label>Tags (máximo 10, separados por coma)
-          <input id="st-tags" autocomplete="off" autocapitalize="off">
-        </label>
-      </section>
+      <div class="st-body">
+        <!-- Vista principal -->
+        <div id="st-main" class="stack">
+          <section class="stack">
+            <div class="st-section-head">
+              <h3>Estado actual</h3>
+              <button type="button" id="st-refresh" class="link-btn">↻ Actualizar</button>
+            </div>
+            <p class="note">Toca una tarjeta para incluirla o quitarla de los cambios.</p>
+            <div id="st-cards" class="st-cards"></div>
+            <p id="st-note" class="note warn" hidden></p>
+          </section>
 
-      <div class="row end">
-        <button type="button" id="st-close">Cerrar</button>
-        <button type="button" class="primary" id="st-apply">Aplicar cambios</button>
+          <div class="seg" role="tablist">
+            <button type="button" role="tab" data-tab="quick" aria-selected="true">⚡ Categoría rápida</button>
+            <button type="button" role="tab" data-tab="edit" aria-selected="false">✏️ Editar todo</button>
+          </div>
+
+          <section id="tab-quick" class="stack">
+            <p class="note">Toca una categoría para cambiarla en los canales marcados. Te pediremos confirmar.</p>
+            <div id="st-favs" class="cat-grid"></div>
+            <div id="st-recent-box" class="stack" hidden>
+              <h4>Recientes</h4>
+              <div id="st-recent" class="cat-grid"></div>
+            </div>
+            <button type="button" id="st-edit-favs" class="link-btn">Quitar favoritas</button>
+          </section>
+
+          <section id="tab-edit" class="stack" hidden>
+            <div class="field">
+              <div class="field-head">
+                <label for="st-title">Título <span class="mod-badge" id="st-title-mod" hidden>modificado</span></label>
+                <span id="st-title-count" class="count">0/140</span>
+              </div>
+              <input id="st-title" maxlength="140" autocomplete="off" placeholder="Título del directo">
+            </div>
+
+            <div class="field">
+              <div class="field-head">
+                <label for="st-cat-search">Categoría <span class="mod-badge" id="st-cat-mod" hidden>modificada</span></label>
+              </div>
+              <div id="st-cat-selected"></div>
+              <input id="st-cat-search" placeholder="🔍 Buscar categoría…  (☆ = guardar en favoritas)" autocomplete="off">
+              <div id="st-cat-results" class="cat-list"></div>
+            </div>
+
+            <div class="field">
+              <div class="field-head">
+                <label for="st-tag-input">Tags <span class="mod-badge" id="st-tags-mod" hidden>modificados</span></label>
+                <span id="st-tags-count" class="count">0/10</span>
+              </div>
+              <div id="st-tags" class="tags-box">
+                <input id="st-tag-input" placeholder="Escribe un tag y pulsa Enter" autocomplete="off" autocapitalize="off">
+              </div>
+              <p class="note">En Twitch los tags se guardan sin espacios ni símbolos. Starvios no usa tags.</p>
+            </div>
+
+            <button type="button" id="st-reset" class="link-btn">↺ Deshacer cambios</button>
+          </section>
+        </div>
+
+        <!-- Revisión y resultados -->
+        <div id="st-review" class="stack" hidden>
+          <h3 id="st-review-title">Revisa los cambios</h3>
+          <p class="note" id="st-review-note">Esto es lo que se va a cambiar en cada canal:</p>
+          <div id="st-review-list" class="st-review"></div>
+        </div>
       </div>
+
+      <footer class="st-foot">
+        <button type="button" id="st-back" hidden>← Volver</button>
+        <button type="button" id="st-primary" class="primary">Revisar cambios</button>
+      </footer>
     </div>
   </dialog>
 
