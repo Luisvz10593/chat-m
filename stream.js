@@ -27,24 +27,45 @@ const needsRelogin = {
   starvios: () => false,
 };
 
-function streamPlatforms() {
-  return PLATFORMS.filter((p) => PROVIDERS[p].logged());
+/*
+ * Destinos que se pueden editar. Twitch y Kick solo permiten editar el canal
+ * propio por API (el rol de editor no sirve). Starvios recibe el directo exacto,
+ * así que también se ofrecen los canales ajenos de la lista: si tu rol lo
+ * permite, Starvios lo acepta; si no, muestra el error.
+ * Destino: { id, p, label, name? }  (name = canal ajeno de Starvios)
+ */
+function streamTargets() {
+  const list = [];
+  if (auth) list.push({ id: 'twitch', p: 'twitch', label: `Twitch (${auth.login})` });
+  if (kickAuth) list.push({ id: 'kick', p: 'kick', label: `Kick (${kickAuth.name || 'tu canal'})` });
+  if (svAuth) {
+    list.push({ id: 'starvios', p: 'starvios', label: 'Starvios (tu canal)' });
+    for (const name of channelsOf('starvios')) {
+      const s = svStreams[name];
+      if (s && s.channelId === svAuth.userId) continue; // es tu propio canal
+      list.push({ id: 'starvios:' + name, p: 'starvios', label: `Starvios · ${name}`, name });
+    }
+  }
+  return list;
 }
-function checkedPlatforms() {
-  return [...document.querySelectorAll('#st-targets input:checked')].map((i) => i.value);
+let stTargets = [];
+function checkedTargets() {
+  const ids = new Set([...document.querySelectorAll('#st-targets input:checked')].map((i) => i.value));
+  return stTargets.filter((t) => ids.has(t.id));
 }
 
 /* ---------- Abrir el panel ---------- */
 function openStream() {
-  const plats = streamPlatforms();
-  $('#st-targets').replaceChildren(...plats.map((p) => {
+  stTargets = streamTargets();
+  const plats = [...new Set(stTargets.map((t) => t.p))];
+  $('#st-targets').replaceChildren(...stTargets.map((t) => {
     const label = document.createElement('label');
-    label.className = 'pick ' + p;
+    label.className = 'pick ' + t.p;
     const box = document.createElement('input');
     box.type = 'checkbox';
-    box.value = p;
-    box.checked = true;
-    label.append(box, ' ' + PLATFORM_NAMES[p]);
+    box.value = t.id;
+    box.checked = !t.name; // los canales ajenos empiezan sin marcar
+    label.append(box, ' ' + t.label);
     return label;
   }));
 
@@ -54,6 +75,7 @@ function openStream() {
     if (needsRelogin[p]()) notes.push(`${PLATFORM_NAMES[p]}: cierra sesión y vuelve a iniciarla en ⚙ para dar el permiso de editar el directo.`);
   }
   if (plats.includes('starvios')) notes.push('Starvios no permite cambiar tags; ahí solo se cambian título y categoría.');
+  if (auth || kickAuth) notes.push('En Twitch y Kick solo se puede editar tu propio canal (su API no acepta el rol de editor).');
   $('#st-note').textContent = notes.join(' ');
   $('#st-note').hidden = !notes.length;
 
@@ -68,24 +90,25 @@ function openStream() {
   renderSelectedCat();
   renderFavs();
   stDialog.showModal();
-  if (plats.length) loadCurrent(plats);
+  loadCurrent(stTargets.filter((t) => !t.name));
 }
 
-// Rellena los campos con lo que tiene ahora el directo (de la primera plataforma que responda)
-async function loadCurrent(plats) {
-  for (const p of plats) {
+// Rellena los campos con lo que tiene ahora tu directo (de la primera plataforma que responda)
+async function loadCurrent(targets) {
+  for (const t of targets) {
     try {
-      const cur = await getCurrent(p);
+      const cur = await getCurrent(t);
       if (!cur) continue;
       if (!stDirty.title) $('#st-title').value = cur.title || '';
       if (!stDirty.tags) $('#st-tags').value = (cur.tags || []).join(', ');
-      $('#st-current').textContent = `Ahora en ${PLATFORM_NAMES[p]}: ${cur.category || 'sin categoría'}`;
+      $('#st-current').textContent = `Ahora en ${t.label}: ${cur.category || 'sin categoría'}`;
       return;
     } catch { /* prueba con la siguiente plataforma */ }
   }
 }
 
-async function getCurrent(p) {
+async function getCurrent(t) {
+  const p = t.p;
   if (p === 'twitch') {
     const j = await helix('GET', 'channels', { broadcaster_id: auth.userId });
     const c = j.data && j.data[0];
@@ -96,13 +119,20 @@ async function getCurrent(p) {
     const c = j.data && j.data[0];
     return c && { title: c.stream_title, category: c.category && c.category.name, tags: c.stream && c.stream.custom_tags };
   }
-  const s = await svOwnStream();
+  const s = await svStreamFor(t);
   return { title: s.title, category: s.category, tags: [] };
 }
 
-async function svOwnStream() {
-  const [s] = await svGet(`live_streams?select=id,title,category&order=started_at.desc&limit=1&channel_id=eq.${svAuth.userId}`);
-  if (!s) throw new Error('Tu cuenta de Starvios no tiene canal de directos.');
+// Directo de Starvios a editar: el tuyo, o el de un canal ajeno de la lista
+async function svStreamFor(t) {
+  let channelId = svAuth.userId;
+  if (t.name) {
+    const [profile] = await svGet('profiles?select=id&username=eq.' + encodeURIComponent(t.name));
+    if (!profile) throw new Error(`el canal ${t.name} no existe`);
+    channelId = profile.id;
+  }
+  const [s] = await svGet(`live_streams?select=id,title,category&order=started_at.desc&limit=1&channel_id=eq.${channelId}`);
+  if (!s) throw new Error(t.name ? `${t.name} no tiene canal de directos` : 'tu cuenta de Starvios no tiene canal de directos');
   return s;
 }
 
@@ -291,7 +321,8 @@ function readTags() {
   return $('#st-tags').value.split(',').map((t) => t.trim()).filter(Boolean).slice(0, 10);
 }
 
-async function applyTo(p, changes) {
+async function applyTo(target, changes) {
+  const p = target.p;
   const { title, cat, tags } = changes;
   // Si la plataforma no tiene la categoría, igual aplica título y tags y luego avisa
   let missingCat = null;
@@ -315,12 +346,19 @@ async function applyTo(p, changes) {
     if (Object.keys(body).length) await kickApi('PATCH', 'channels', body);
   } else if (p === 'starvios') {
     if (!title && !cat) return 'omitido';
-    const s = await svOwnStream();
+    const s = await svStreamFor(target);
+    const wanted = { title: title || s.title, category: cat ? cat.name : s.category };
     await svAuthed('POST', 'rpc/update_stream_info', {
       _stream_id: s.id,
-      _title: title || s.title,
-      _category: cat ? cat.name : s.category,
+      _title: wanted.title,
+      _category: wanted.category,
     });
+    // Comprueba que de verdad cambió (si tu rol no lo permite, Starvios podría ignorarlo sin error)
+    const after = await svStreamFor(target);
+    const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+    if (!same(after.title, wanted.title) || !same(after.category, wanted.category)) {
+      throw new Error('Starvios no aplicó el cambio; tu rol en ese canal no lo permite');
+    }
   }
   if (missingCat) {
     const rest = title || tags ? ' (lo demás sí se cambió)' : '';
@@ -330,23 +368,24 @@ async function applyTo(p, changes) {
 }
 
 async function applyChanges(changes) {
-  const plats = checkedPlatforms();
-  if (!plats.length) { toast('Elige al menos una plataforma.', true); return false; }
+  const targets = checkedTargets();
+  if (!targets.length) { toast('Elige al menos un canal.', true); return false; }
   if (!changes.title && !changes.cat && !changes.tags) { toast('No hay cambios que aplicar.', true); return false; }
 
   const btn = $('#st-apply');
   btn.disabled = true;
   try {
-    const results = await Promise.allSettled(plats.map((p) => applyTo(p, changes)));
-    const ok = plats.filter((p, i) => results[i].status === 'fulfilled' && results[i].value === 'ok');
-    const failed = plats.map((p, i) => [p, results[i]]).filter(([, r]) => r.status === 'rejected');
+    const results = await Promise.allSettled(targets.map((t) => applyTo(t, changes)));
+    const ok = targets.filter((t, i) => results[i].status === 'fulfilled' && results[i].value === 'ok');
+    const failed = targets.map((t, i) => [t, results[i]]).filter(([, r]) => r.status === 'rejected');
     if (changes.cat && ok.length) { addRecent(changes.cat); renderFavs(); }
+    const okNames = ok.map((t) => t.label).join(', ');
     if (!failed.length) {
-      toast('Directo actualizado en ' + ok.map((p) => PLATFORM_NAMES[p]).join(', ') + '.');
+      toast('Directo actualizado en ' + okNames + '.');
       return true;
     }
-    const msg = failed.map(([p, r]) => `${PLATFORM_NAMES[p]}: ${r.reason.message}`).join(' · ');
-    toast((ok.length ? 'Actualizado en ' + ok.map((p) => PLATFORM_NAMES[p]).join(', ') + '. ' : '') + 'Falló — ' + msg, true);
+    const msg = failed.map(([t, r]) => `${t.label}: ${r.reason.message}`).join(' · ');
+    toast((ok.length ? 'Actualizado en ' + okNames + '. ' : '') + 'Falló — ' + msg, true);
     return false;
   } finally {
     btn.disabled = false;

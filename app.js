@@ -1199,9 +1199,13 @@ function clearReply() {
    ========================================================= */
 const ALL_TARGETS = '*';
 
-// Envía el mismo mensaje a todos los canales con sesión; avisa cuáles fallaron
+// Canales donde se puede escribir: con sesión iniciada y visibles (no ocultos arriba)
+const visibleTargets = () => sources().filter((s) => PROVIDERS[s.p].logged() && !cfg.hidden.includes(s.key));
+
+// Envía el mismo mensaje a todos los canales visibles con sesión; avisa cuáles fallaron
 async function sendToAll(text) {
-  const targets = sources().filter((s) => PROVIDERS[s.p].logged());
+  const targets = visibleTargets();
+  if (!targets.length) throw new Error('No hay canales visibles donde escribir.');
   const results = await Promise.allSettled(targets.map((s) => PROVIDERS[s.p].send(s.ch, text, null)));
   const failed = targets.filter((_, i) => results[i].status === 'rejected');
   if (!failed.length) {
@@ -1220,10 +1224,11 @@ function updateComposer() {
   const targets = sources().filter((s) => PROVIDERS[s.p].logged());
   const wanted = select.value || cfg.sendTarget;
   const options = targets.map((s) => new Option(srcLabel(s.p, s.ch), s.key));
-  // Con más de un destino, "Todos" envía el mismo mensaje a todos a la vez
-  if (targets.length > 1) options.unshift(new Option(`Todos (${targets.length})`, ALL_TARGETS));
+  // Con más de un canal visible, "Todos" envía el mismo mensaje a todos ellos a la vez
+  const visible = visibleTargets().length;
+  if (visible > 1) options.unshift(new Option(`Todos los visibles (${visible})`, ALL_TARGETS));
   select.replaceChildren(...options);
-  if (wanted === ALL_TARGETS ? targets.length > 1 : targets.some((s) => s.key === wanted)) select.value = wanted;
+  if (wanted === ALL_TARGETS ? visible > 1 : targets.some((s) => s.key === wanted)) select.value = wanted;
 
   const anyLogged = PLATFORMS.some((p) => PROVIDERS[p].logged());
   $('#send-form').hidden = !targets.length;
@@ -1233,7 +1238,7 @@ function updateComposer() {
     : 'Inicia sesión en ⚙ Ajustes para escribir y moderar';
   if (select.value === ALL_TARGETS) {
     select.className = 'target all';
-    $('#input').placeholder = `Escribe en todos los canales (${targets.length})…`;
+    $('#input').placeholder = `Escribe en todos los canales visibles (${visible})…`;
   } else {
     const [p, ch] = select.value ? splitKey(select.value) : ['', ''];
     select.className = 'target ' + p;
