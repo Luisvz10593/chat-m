@@ -194,16 +194,28 @@ async function getCurrent(t) {
     return { title: c.title, category: c.game_name, categoryImg: img, tags: c.tags || [] };
   }
   if (t.p === 'kick') {
-    const j = await kickApi('GET', 'channels');
+    const j = await kickApi('GET', 'channels?broadcaster_user_id=' + encodeURIComponent(await kickUserId()));
     const c = j.data && j.data[0];
-    if (!c) throw new Error('no se encontró el canal');
+    if (!c) throw new Error('Kick no devolvió los datos de tu canal');
     return {
       title: c.stream_title, category: c.category && c.category.name,
       categoryImg: c.category && c.category.thumbnail, tags: (c.stream && c.stream.custom_tags) || [],
     };
   }
   const s = await svStreamFor(t);
-  return { title: s.title, category: s.category, categoryImg: '', tags: null }; // Starvios no usa tags
+  return { title: s.title, category: s.category, categoryImg: '', tags: s.tags || [] };
+}
+
+// ID de tu usuario de Kick (las sesiones antiguas podrían no tenerlo guardado)
+async function kickUserId() {
+  if (kickAuth.userId) return kickAuth.userId;
+  const me = await kickApi('GET', 'users');
+  const u = me.data && me.data[0];
+  if (!u) throw new Error('Kick no devolvió tu usuario');
+  kickAuth.userId = u.user_id;
+  kickAuth.name = kickAuth.name || u.name;
+  store.set('kickAuth', kickAuth);
+  return kickAuth.userId;
 }
 
 // Directo de Starvios a editar: el tuyo, o el de un canal ajeno de la lista
@@ -214,7 +226,7 @@ async function svStreamFor(t) {
     if (!profile) throw new Error(`el canal ${t.name} no existe`);
     channelId = profile.id;
   }
-  const [s] = await svGet(`live_streams?select=id,title,category&order=started_at.desc&limit=1&channel_id=eq.${channelId}`);
+  const [s] = await svGet(`live_streams?select=id,title,category,tags,language&order=started_at.desc&limit=1&channel_id=eq.${channelId}`);
   if (!s) throw new Error(t.name ? `${t.name} no tiene canal de directos` : 'tu cuenta de Starvios no tiene canal de directos');
   return s;
 }
@@ -247,8 +259,8 @@ function renderCards() {
         const tags = el('div', 'st-card-tags');
         tags.append(...cur.tags.map((x) => el('span', 'tag', x)));
         card.append(tags);
-      } else if (cur.tags === null) {
-        card.append(el('p', 'st-card-muted', 'Starvios no usa tags'));
+      } else {
+        card.append(el('p', 'st-card-muted', 'Sin tags'));
       }
     }
     if (needsRelogin[t.p]()) card.append(el('p', 'st-card-warn', 'Vuelve a iniciar sesión para poder editar'));
@@ -556,10 +568,11 @@ function reviewCard(t, changes) {
   if (changes.title) { card.append(diffRow('Título', cur.title, changes.title)); any = true; }
   if (changes.cat) { card.append(diffRow('Categoría', cur.category, changes.cat.name)); any = true; }
   if (changes.tags) {
-    if (t.p === 'starvios') {
-      card.append(el('p', 'st-card-muted', 'Tags: Starvios no usa tags, se omiten.'));
+    if (t.p === 'starvios' && t.name) {
+      card.append(el('p', 'st-card-muted', 'Tags: Starvios solo permite cambiarlos en tu propio canal, se omiten.'));
     } else {
-      const shown = t.p === 'twitch' ? [...new Set(changes.tags.map(twitchTag).filter(Boolean))] : changes.tags;
+      // Twitch y Starvios guardan los tags sin espacios ni símbolos
+      const shown = t.p === 'kick' ? changes.tags : cleanTags(changes.tags);
       card.append(diffRow('Tags', (cur.tags || []).join(', '), shown.join(', ') || '(sin tags)'));
       any = true;
     }
@@ -571,8 +584,9 @@ function reviewCard(t, changes) {
 /* =========================================================
    Aplicar y mostrar el resultado por canal
    ========================================================= */
-// Formato de tags de Twitch: sin espacios ni símbolos, máximo 25 caracteres
-const twitchTag = (t) => t.replace(/[^\p{L}\p{N}]/gu, '').slice(0, 25);
+// Formato de tags de Twitch y Starvios: sin espacios ni símbolos, máximo 25 caracteres
+const twitchTag = (t) => t.normalize('NFC').replace(/[^\p{L}\p{N}]/gu, '').slice(0, 25);
+const cleanTags = (tags) => [...new Set(tags.map(twitchTag).filter(Boolean))];
 
 async function applyTo(target, changes) {
   const p = target.p;
@@ -586,7 +600,7 @@ async function applyTo(target, changes) {
       const t = await resolveCat(cat, 'twitch');
       if (t) body.game_id = t.id; else missingCat = cat.name;
     }
-    if (tags) body.tags = [...new Set(tags.map(twitchTag).filter(Boolean))];
+    if (tags) body.tags = cleanTags(tags);
     if (Object.keys(body).length) await helix('PATCH', 'channels', { broadcaster_id: auth.userId }, body);
   } else if (p === 'kick') {
     const body = {};
@@ -598,15 +612,23 @@ async function applyTo(target, changes) {
     if (tags) body.custom_tags = tags;
     if (Object.keys(body).length) await kickApi('PATCH', 'channels', body);
   } else if (p === 'starvios') {
-    if (!title && !cat) return 'omitido';
+    // Los tags solo se pueden cambiar en tu propio canal (set_live_tags no recibe otro canal)
+    const doTags = tags && !target.name;
+    if (!title && !cat && !doTags) return 'omitido';
     const s = await svStreamFor(target);
-    const wanted = { title: title || s.title, category: cat ? cat.name : s.category };
-    await svAuthed('POST', 'rpc/update_stream_info', { _stream_id: s.id, _title: wanted.title, _category: wanted.category });
-    // Comprueba que de verdad cambió (si tu rol no lo permite, Starvios podría ignorarlo sin error)
-    const after = await svStreamFor(target);
     const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
-    if (!same(after.title, wanted.title) || !same(after.category, wanted.category)) {
-      throw new Error('Starvios no aplicó el cambio; tu rol en ese canal no lo permite');
+    if (title || cat) {
+      const wanted = { title: title || s.title, category: cat ? cat.name : s.category };
+      await svAuthed('POST', 'rpc/update_stream_info', { _stream_id: s.id, _title: wanted.title, _category: wanted.category });
+      // Comprueba que de verdad cambió (si tu rol no lo permite, Starvios podría ignorarlo sin error)
+      const after = await svStreamFor(target);
+      if (!same(after.title, wanted.title) || !same(after.category, wanted.category)) {
+        throw new Error('Starvios no aplicó el cambio; tu rol en ese canal no lo permite');
+      }
+    }
+    if (doTags) {
+      // Mismo formato que la web de Starvios; se conserva el idioma que ya tenía el directo
+      await svAuthed('POST', 'rpc/set_live_tags', { _tags: cleanTags(tags), _language: s.language || 'es' });
     }
   }
   if (missingCat) {
