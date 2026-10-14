@@ -1,0 +1,14 @@
+{
+  "name": "Chat M",
+  "short_name": "Chat M",
+  "description": "Chat unificado de Twitch y Kick para tus directos",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0e0e12",
+  "theme_color": "#0e0e12",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

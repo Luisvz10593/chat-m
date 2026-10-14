@@ -1,0 +1,826 @@
+'use strict';
+
+/* =========================================================
+   Chat M — chat unificado de Twitch + Kick para tablet
+   ========================================================= */
+
+const $ = (s) => document.querySelector(s);
+
+// ---------- Almacenamiento local (puede fallar en modo privado) ----------
+const store = {
+  get(k, d) {
+    try { const v = localStorage.getItem('chatm.' + k); return v == null ? d : JSON.parse(v); }
+    catch { return d; }
+  },
+  set(k, v) {
+    try { localStorage.setItem('chatm.' + k, JSON.stringify(v)); } catch { /* sin almacenamiento */ }
+  },
+};
+
+const DEFAULTS = {
+  twitchChannel: '',
+  kickChannel: '',
+  twitchClientId: '',
+  kickChatroomId: '',
+  fontSize: 19,
+  showTime: true,
+  wakeLock: true,
+  showTwitch: true,
+  showKick: true,
+};
+const cfg = Object.assign({}, DEFAULTS, store.get('cfg', {}));
+let auth = store.get('auth', null); // { token, login, userId }
+
+const TWITCH_SCOPES = [
+  'user:write:chat',
+  'moderator:manage:chat_messages',
+  'moderator:manage:banned_users',
+].join(' ');
+
+const MAX_MESSAGES = 400;
+
+// ---------- Utilidades de interfaz ----------
+let toastTimer;
+function toast(text, isError = false) {
+  const t = $('#toast');
+  t.textContent = text;
+  t.classList.toggle('error', isError);
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
+}
+
+function setStatus(platform, status, text) {
+  const chip = $('#chip-' + platform);
+  chip.dataset.status = status;
+  $('#st-' + platform).textContent = text;
+}
+
+function applyView() {
+  document.documentElement.style.setProperty('--fs', cfg.fontSize + 'px');
+  document.body.classList.toggle('hide-time', !cfg.showTime);
+  document.body.classList.toggle('hide-twitch', !cfg.showTwitch);
+  document.body.classList.toggle('hide-kick', !cfg.showKick);
+  $('#chip-twitch').setAttribute('aria-pressed', String(cfg.showTwitch));
+  $('#chip-kick').setAttribute('aria-pressed', String(cfg.showKick));
+  updateComposer();
+}
+
+function saveCfg() { store.set('cfg', cfg); }
+
+// ---------- Feed de mensajes ----------
+const feed = $('#feed');
+let stickToBottom = true;
+
+feed.addEventListener('scroll', () => {
+  stickToBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
+  if (stickToBottom) $('#jump').hidden = true;
+});
+$('#jump').addEventListener('click', () => {
+  feed.scrollTop = feed.scrollHeight;
+  $('#jump').hidden = true;
+});
+
+function fmtTime(d) {
+  return d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+}
+
+function myNames() {
+  return [auth && auth.login, cfg.twitchChannel, cfg.kickChannel]
+    .filter(Boolean).map((n) => n.toLowerCase());
+}
+
+/**
+ * m = { platform, id, userId, user, color, badges:[string],
+ *       parts:[{text}|{img, alt}], time:Date, action?, replyTo? }
+ */
+function addMessage(m) {
+  const el = document.createElement('div');
+  el.className = 'msg ' + m.platform;
+  el.dataset.id = m.id || '';
+  el.dataset.user = (m.user || '').toLowerCase();
+  el._msg = m;
+
+  const time = document.createElement('span');
+  time.className = 'time';
+  time.textContent = fmtTime(m.time || new Date());
+
+  const content = document.createElement('div');
+  content.className = 'content';
+
+  if (m.replyTo) {
+    const ref = document.createElement('span');
+    ref.className = 'reply-ref';
+    ref.textContent = '↪ respondiendo a @' + m.replyTo;
+    content.append(ref);
+  }
+
+  for (const b of m.badges || []) {
+    const p = document.createElement('span');
+    p.className = 'pill ' + b;
+    p.textContent = BADGE_LABELS[b] || b.toUpperCase();
+    content.append(p);
+  }
+
+  const user = document.createElement('span');
+  user.className = 'user';
+  user.style.color = readableColor(m.color, m.platform);
+  user.textContent = m.user;
+  content.append(user, document.createTextNode(m.action ? ' ' : ': '));
+
+  const body = document.createElement('span');
+  body.className = 'body' + (m.action ? ' action' : '');
+  for (const part of m.parts) {
+    if (part.img) {
+      const img = document.createElement('img');
+      img.className = 'emote';
+      img.src = part.img;
+      img.alt = img.title = part.alt;
+      img.loading = 'lazy';
+      body.append(img);
+    } else {
+      body.append(document.createTextNode(part.text));
+    }
+  }
+  content.append(body);
+
+  const plain = m.parts.map((p) => p.text || p.alt).join('').toLowerCase();
+  if (myNames().some((n) => plain.includes('@' + n))) el.classList.add('mention');
+
+  el.append(time, content);
+  el.addEventListener('click', () => openActions(m, el));
+  pushEl(el);
+}
+
+function addSystem(platform, text, highlight = false) {
+  const el = document.createElement('div');
+  el.className = 'msg system ' + platform + (highlight ? ' highlight' : '');
+  const time = document.createElement('span');
+  time.className = 'time';
+  time.textContent = fmtTime(new Date());
+  const content = document.createElement('div');
+  content.className = 'content';
+  content.textContent = text;
+  el.append(time, content);
+  pushEl(el);
+}
+
+function pushEl(el) {
+  feed.append(el);
+  while (feed.childElementCount > MAX_MESSAGES) feed.firstElementChild.remove();
+  if (stickToBottom) feed.scrollTop = feed.scrollHeight;
+  else $('#jump').hidden = false;
+}
+
+function markDeleted(platform, id) {
+  if (!id) return;
+  for (const el of feed.querySelectorAll('.msg.' + platform)) {
+    if (el.dataset.id === String(id)) el.classList.add('deleted');
+  }
+}
+
+function markUserCleared(platform, username) {
+  const u = String(username || '').toLowerCase();
+  for (const el of feed.querySelectorAll('.msg.' + platform)) {
+    if (el.dataset.user === u) el.classList.add('deleted');
+  }
+}
+
+const BADGE_LABELS = {
+  broadcaster: 'STREAMER', moderator: 'MOD', vip: 'VIP',
+  subscriber: 'SUB', founder: 'SUB', og: 'OG', verified: '✔',
+};
+
+// Evita nombres ilegibles sobre fondo oscuro
+function readableColor(color, platform) {
+  if (!color || !/^#[0-9a-f]{6}$/i.test(color)) {
+    return platform === 'kick' ? '#53fc18' : '#bf94ff';
+  }
+  const n = parseInt(color.slice(1), 16);
+  const r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+  const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+  if (lum >= 90) return color;
+  const k = 90 / Math.max(lum, 1);
+  const f = (v) => Math.min(255, Math.round(v * k + 40));
+  return `rgb(${f(r)},${f(g)},${f(b)})`;
+}
+
+/* =========================================================
+   TWITCH — lectura por IRC anónimo
+   ========================================================= */
+let twitchWs = null;
+let twitchRetry = 0;
+let twitchRoomId = null; // id del broadcaster (viene en ROOMSTATE)
+
+function connectTwitch() {
+  if (twitchWs) { twitchWs.onclose = null; twitchWs.close(); twitchWs = null; }
+  const ch = cfg.twitchChannel.trim().toLowerCase().replace(/^#/, '');
+  if (!ch) { setStatus('twitch', 'off', 'sin canal'); return; }
+
+  setStatus('twitch', 'wait', 'conectando…');
+  const ws = twitchWs = new WebSocket('wss://irc-ws.chat.twitch.tv:443');
+
+  ws.onopen = () => {
+    ws.send('CAP REQ :twitch.tv/tags twitch.tv/commands');
+    ws.send('PASS SCHMOOPIIE');
+    ws.send('NICK justinfan' + Math.floor(1000 + Math.random() * 80000));
+    ws.send('JOIN #' + ch);
+  };
+  ws.onmessage = (e) => {
+    for (const line of e.data.split('\r\n')) if (line) handleIrc(ws, parseIrc(line));
+  };
+  ws.onclose = () => {
+    if (twitchWs !== ws) return;
+    const wait = Math.min(30000, 1000 * 2 ** twitchRetry++);
+    setStatus('twitch', 'err', 'reconectando…');
+    setTimeout(() => { if (twitchWs === ws) connectTwitch(); }, wait);
+  };
+}
+
+function unescapeTag(v) {
+  return v.replace(/\\(.)/g, (_, c) => ({ s: ' ', ':': ';', '\\': '\\', r: '\r', n: '\n' }[c] ?? c));
+}
+
+function parseIrc(line) {
+  const tags = {};
+  let prefix = '';
+  if (line[0] === '@') {
+    const sp = line.indexOf(' ');
+    for (const kv of line.slice(1, sp).split(';')) {
+      const eq = kv.indexOf('=');
+      tags[kv.slice(0, eq)] = unescapeTag(kv.slice(eq + 1));
+    }
+    line = line.slice(sp + 1);
+  }
+  if (line[0] === ':') {
+    const sp = line.indexOf(' ');
+    prefix = line.slice(1, sp);
+    line = line.slice(sp + 1);
+  }
+  let trailing = null;
+  const ti = line.indexOf(' :');
+  if (ti >= 0) { trailing = line.slice(ti + 2); line = line.slice(0, ti); }
+  const parts = line.split(' ');
+  return { tags, prefix, command: parts[0], params: parts.slice(1), trailing };
+}
+
+function handleIrc(ws, msg) {
+  const { tags, command, trailing } = msg;
+  switch (command) {
+    case 'PING':
+      ws.send('PONG :' + (trailing || 'tmi.twitch.tv'));
+      break;
+    case 'ROOMSTATE':
+      if (tags['room-id']) twitchRoomId = tags['room-id'];
+      twitchRetry = 0;
+      setStatus('twitch', 'ok', cfg.twitchChannel.toLowerCase());
+      break;
+    case 'PRIVMSG':
+      handleTwitchMsg(tags, msg.prefix, trailing || '');
+      break;
+    case 'CLEARMSG':
+      markDeleted('twitch', tags['target-msg-id']);
+      break;
+    case 'CLEARCHAT':
+      if (trailing) markUserCleared('twitch', trailing);
+      else addSystem('twitch', 'El chat de Twitch fue limpiado por un moderador.');
+      break;
+    case 'USERNOTICE': {
+      const sys = tags['system-msg'] || '';
+      addSystem('twitch', sys + (trailing ? ' — ' + trailing : ''), true);
+      break;
+    }
+    case 'NOTICE':
+      if (trailing) addSystem('twitch', trailing);
+      break;
+    case 'RECONNECT':
+      connectTwitch();
+      break;
+  }
+}
+
+function handleTwitchMsg(tags, prefix, text) {
+  let action = false;
+  if (text.startsWith('\x01ACTION ')) { action = true; text = text.slice(8).replace(/\x01$/, ''); }
+
+  const badges = (tags.badges || '').split(',').map((b) => b.split('/')[0]).filter((b) => BADGE_LABELS[b]);
+  const replyTo = tags['reply-parent-display-name'] || null;
+  // Twitch antepone "@usuario " en las respuestas: lo quitamos porque ya mostramos la referencia
+  if (replyTo && text.toLowerCase().startsWith('@' + replyTo.toLowerCase() + ' ')) {
+    const cut = replyTo.length + 2;
+    text = text.slice(cut);
+    tags.emotes = shiftEmotes(tags.emotes, cut);
+  }
+
+  addMessage({
+    platform: 'twitch',
+    id: tags.id,
+    userId: tags['user-id'],
+    user: tags['display-name'] || prefix.split('!')[0],
+    login: prefix.split('!')[0],
+    color: tags.color,
+    badges: [...new Set(badges)],
+    parts: twitchParts(text, tags.emotes),
+    time: tags['tmi-sent-ts'] ? new Date(Number(tags['tmi-sent-ts'])) : new Date(),
+    action,
+    replyTo,
+  });
+}
+
+function shiftEmotes(emotes, cut) {
+  if (!emotes) return emotes;
+  return emotes.split('/').map((e) => {
+    const [id, pos] = e.split(':');
+    const ranges = pos.split(',').map((r) => r.split('-').map(Number))
+      .filter(([a]) => a >= cut).map(([a, b]) => `${a - cut}-${b - cut}`);
+    return ranges.length ? `${id}:${ranges.join(',')}` : null;
+  }).filter(Boolean).join('/');
+}
+
+function twitchParts(text, emotesTag) {
+  if (!emotesTag) return [{ text }];
+  const chars = Array.from(text); // posiciones en code points
+  const ranges = [];
+  for (const e of emotesTag.split('/')) {
+    const [id, pos] = e.split(':');
+    if (!pos) continue;
+    for (const r of pos.split(',')) {
+      const [a, b] = r.split('-').map(Number);
+      ranges.push({ a, b, id });
+    }
+  }
+  ranges.sort((x, y) => x.a - y.a);
+  const out = [];
+  let i = 0;
+  for (const r of ranges) {
+    if (r.a < i) continue;
+    if (r.a > i) out.push({ text: chars.slice(i, r.a).join('') });
+    out.push({
+      img: `https://static-cdn.jtvnw.net/emoticons/v2/${encodeURIComponent(r.id)}/default/dark/2.0`,
+      alt: chars.slice(r.a, r.b + 1).join(''),
+    });
+    i = r.b + 1;
+  }
+  if (i < chars.length) out.push({ text: chars.slice(i).join('') });
+  return out;
+}
+
+/* =========================================================
+   TWITCH — cuenta (OAuth implícito) y API Helix
+   ========================================================= */
+function redirectUrl() {
+  return location.origin + location.pathname;
+}
+
+function twitchLogin() {
+  if (!cfg.twitchClientId) {
+    toast('Primero pega el Client ID de tu app de Twitch en Ajustes.', true);
+    return;
+  }
+  if (location.protocol === 'file:') {
+    toast('Para iniciar sesión la app debe abrirse desde https:// o http://localhost (ver LEEME).', true);
+    return;
+  }
+  const state = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  try { sessionStorage.setItem('chatm.state', state); } catch { /* ignorar */ }
+  const params = new URLSearchParams({
+    response_type: 'token',
+    client_id: cfg.twitchClientId,
+    redirect_uri: redirectUrl(),
+    scope: TWITCH_SCOPES,
+    state,
+    force_verify: 'true',
+  });
+  location.href = 'https://id.twitch.tv/oauth2/authorize?' + params;
+}
+
+function twitchLogout() {
+  auth = null;
+  store.set('auth', null);
+  updateAuthUi();
+  updateComposer();
+  toast('Sesión de Twitch cerrada.');
+}
+
+async function handleAuthRedirect() {
+  const hash = location.hash.slice(1);
+  if (!hash.includes('access_token') && !hash.includes('error')) return;
+  history.replaceState(null, '', location.pathname + location.search);
+  const p = new URLSearchParams(hash);
+  if (p.get('error')) { toast('Twitch rechazó el inicio de sesión: ' + (p.get('error_description') || p.get('error')), true); return; }
+
+  let expected = null;
+  try { expected = sessionStorage.getItem('chatm.state'); sessionStorage.removeItem('chatm.state'); } catch { /* ignorar */ }
+  if (expected && expected !== p.get('state')) { toast('El inicio de sesión no coincide; inténtalo otra vez.', true); return; }
+
+  if (await validateToken(p.get('access_token'))) toast('Sesión iniciada como ' + auth.login);
+}
+
+async function validateToken(token) {
+  try {
+    const r = await fetch('https://id.twitch.tv/oauth2/validate', { headers: { Authorization: 'OAuth ' + token } });
+    if (!r.ok) throw new Error('token inválido');
+    const j = await r.json();
+    auth = { token, login: j.login, userId: j.user_id };
+    store.set('auth', auth);
+    return true;
+  } catch {
+    if (auth && auth.token === token) {
+      auth = null;
+      store.set('auth', null);
+      toast('Tu sesión de Twitch expiró. Inicia sesión de nuevo.', true);
+    }
+    return false;
+  } finally {
+    updateAuthUi();
+    updateComposer();
+  }
+}
+
+async function helix(method, path, params, body) {
+  if (!auth) throw new Error('Inicia sesión con Twitch primero.');
+  const url = 'https://api.twitch.tv/helix/' + path + (params ? '?' + new URLSearchParams(params) : '');
+  const r = await fetch(url, {
+    method,
+    headers: {
+      Authorization: 'Bearer ' + auth.token,
+      'Client-Id': cfg.twitchClientId,
+      'Content-Type': 'application/json',
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (r.status === 401) { await validateToken(auth.token); throw new Error('Sesión expirada.'); }
+  const text = await r.text();
+  const j = text ? JSON.parse(text) : {};
+  if (!r.ok) throw new Error(j.message || 'Error ' + r.status);
+  return j;
+}
+
+function requireRoom() {
+  if (!twitchRoomId) throw new Error('Aún no hay conexión con el canal de Twitch.');
+  return twitchRoomId;
+}
+
+async function twitchSend(message, replyId) {
+  const body = { broadcaster_id: requireRoom(), sender_id: auth.userId, message };
+  if (replyId) body.reply_parent_message_id = replyId;
+  const j = await helix('POST', 'chat/messages', null, body);
+  const res = j.data && j.data[0];
+  if (res && !res.is_sent) throw new Error((res.drop_reason && res.drop_reason.message) || 'Twitch no envió el mensaje.');
+}
+
+async function twitchDelete(messageId) {
+  await helix('DELETE', 'moderation/chat', {
+    broadcaster_id: requireRoom(), moderator_id: auth.userId, message_id: messageId,
+  });
+}
+
+async function twitchBan(userId, duration) {
+  const data = { user_id: userId, reason: 'Chat M' };
+  if (duration) data.duration = duration;
+  await helix('POST', 'moderation/bans', {
+    broadcaster_id: requireRoom(), moderator_id: auth.userId,
+  }, { data });
+}
+
+/* =========================================================
+   KICK — lectura consultando el historial del chat
+   (Kick retiró su WebSocket público de Pusher y el nuevo
+   solo acepta conexiones desde kick.com, así que pedimos
+   los últimos mensajes cada 2 segundos.)
+   ========================================================= */
+const KICK_POLL_MS = 2000;
+let kickGen = 0;          // invalida ciclos de consulta anteriores al reconectar
+let kickTimer = null;
+let kickFails = 0;
+let kickPrev = [];        // [{id, t}] de la consulta anterior
+const kickSeen = new Set();
+
+async function resolveKickRoom(slug) {
+  if (cfg.kickChatroomId) return String(cfg.kickChatroomId).trim();
+  const cached = store.get('kickRoom.' + slug, null);
+  if (cached) return cached;
+  const r = await fetch('https://kick.com/api/v2/channels/' + encodeURIComponent(slug));
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const j = await r.json();
+  const id = j && j.chatroom && j.chatroom.id;
+  if (!id) throw new Error('sin chatroom');
+  store.set('kickRoom.' + slug, String(id));
+  return String(id);
+}
+
+async function connectKick() {
+  const gen = ++kickGen;
+  clearTimeout(kickTimer);
+  kickPrev = [];
+  const slug = cfg.kickChannel.trim().toLowerCase();
+  if (!slug) { setStatus('kick', 'off', 'sin canal'); return; }
+
+  setStatus('kick', 'wait', 'conectando…');
+  let roomId;
+  try {
+    roomId = await resolveKickRoom(slug);
+  } catch {
+    if (gen !== kickGen) return;
+    setStatus('kick', 'err', 'falta ID');
+    addSystem('kick', 'No se pudo detectar el chat de Kick automáticamente. Abre Ajustes → Avanzado y escribe el ID del chatroom.');
+    return;
+  }
+
+  const poll = async () => {
+    if (gen !== kickGen) return;
+    try {
+      const r = await fetch(`https://web.kick.com/api/v1/chat/${encodeURIComponent(roomId)}/history`, { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      if (gen !== kickGen) return;
+      // Kick los entrega del más nuevo al más viejo
+      const msgs = ((j.data && j.data.messages) || []).slice().reverse();
+      detectKickDeletions(msgs);
+      msgs.forEach(handleKickMsg);
+      kickFails = 0;
+      setStatus('kick', 'ok', slug);
+    } catch {
+      if (gen !== kickGen) return;
+      kickFails++;
+      setStatus('kick', 'err', 'reintentando…');
+    }
+    const wait = kickFails ? Math.min(30000, KICK_POLL_MS * 2 ** kickFails) : KICK_POLL_MS;
+    kickTimer = setTimeout(poll, wait);
+  };
+  poll();
+}
+
+// Un mensaje que estaba en la consulta anterior y desaparece, aunque sigan
+// llegando mensajes más viejos que él, fue borrado por un moderador.
+function detectKickDeletions(msgs) {
+  const now = msgs.map((m) => ({ id: m.id, t: Date.parse(m.created_at) || 0 }));
+  if (now.length && kickPrev.length) {
+    const oldest = now[0].t;
+    const ids = new Set(now.map((m) => m.id));
+    for (const p of kickPrev) if (p.t > oldest && !ids.has(p.id)) markDeleted('kick', p.id);
+  }
+  kickPrev = now;
+}
+
+function handleKickMsg(d) {
+  if (!d || !d.id || kickSeen.has(d.id)) return;
+  kickSeen.add(d.id);
+  if (kickSeen.size > 3000) kickSeen.delete(kickSeen.values().next().value);
+
+  const sender = d.sender || {};
+  const identity = sender.identity || {};
+  const badges = (identity.badges || []).map((b) => b.type).filter((b) => BADGE_LABELS[b]);
+
+  let meta = d.metadata;
+  if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch { meta = null; } }
+  const replyTo = d.type === 'reply' && meta && meta.original_sender ? meta.original_sender.username : null;
+
+  addMessage({
+    platform: 'kick',
+    id: d.id,
+    userId: sender.id,
+    user: sender.username || sender.slug || '?',
+    color: identity.color,
+    badges: [...new Set(badges)],
+    parts: kickParts(d.content || ''),
+    time: d.created_at ? new Date(d.created_at) : new Date(),
+    replyTo,
+  });
+}
+
+function kickParts(text) {
+  const out = [];
+  const re = /\[emote:(\d+):([^\]]*)\]/g;
+  let last = 0, m;
+  while ((m = re.exec(text))) {
+    if (m.index > last) out.push({ text: text.slice(last, m.index) });
+    out.push({ img: `https://files.kick.com/emotes/${m[1]}/fullsize`, alt: m[2] });
+    last = re.lastIndex;
+  }
+  if (last < text.length) out.push({ text: text.slice(last) });
+  return out;
+}
+
+/* =========================================================
+   Acciones sobre mensajes
+   ========================================================= */
+const actions = $('#actions');
+let current = null;
+let replyTarget = null;
+
+function openActions(m) {
+  current = m;
+  const plat = $('#act-platform');
+  plat.className = 'badge-platform ' + m.platform;
+  plat.textContent = m.platform === 'twitch' ? 'Twitch' : 'Kick';
+  $('#act-user').textContent = m.user;
+  $('#act-text').textContent = m.parts.map((p) => p.text || p.alt).join('');
+
+  const isTwitch = m.platform === 'twitch';
+  const canMod = isTwitch && !!auth;
+  const note = $('#act-note');
+  if (!isTwitch) {
+    note.hidden = false;
+    note.textContent = 'Responder y moderar en Kick llegará en la fase 2. Por ahora usa “Mencionar” para escribirle desde Twitch.';
+  } else if (!auth) {
+    note.hidden = false;
+    note.textContent = 'Inicia sesión con Twitch (Ajustes) para responder y moderar.';
+  } else {
+    note.hidden = true;
+  }
+
+  actions.querySelector('[data-act="reply"]').disabled = !canMod;
+  actions.querySelector('[data-act="mention"]').disabled = false;
+  for (const b of actions.querySelectorAll('.mod')) b.disabled = !canMod;
+  actions.showModal();
+}
+
+actions.addEventListener('click', async (e) => {
+  if (e.target === actions) { actions.close(); return; }
+  const btn = e.target.closest('button[data-act]');
+  if (!btn || !current) return;
+  const m = current;
+  const act = btn.dataset.act;
+
+  if (act === 'close') { actions.close(); return; }
+  if (act === 'mention') {
+    actions.close();
+    const input = $('#input');
+    input.value = `@${m.user} ` + input.value;
+    input.focus();
+    return;
+  }
+  if (act === 'reply') {
+    actions.close();
+    replyTarget = m;
+    $('#reply-text').textContent = '↪ Respondiendo a @' + m.user;
+    $('#reply-bar').hidden = false;
+    $('#input').focus();
+    return;
+  }
+  if (act === 'ban' && !confirm(`¿Banear permanentemente a ${m.user} de Twitch?`)) return;
+
+  btn.disabled = true;
+  try {
+    if (act === 'delete') { await twitchDelete(m.id); toast('Mensaje borrado.'); }
+    if (act === 'timeout60') { await twitchBan(m.userId, 60); toast(`${m.user}: timeout de 1 min.`); }
+    if (act === 'timeout600') { await twitchBan(m.userId, 600); toast(`${m.user}: timeout de 10 min.`); }
+    if (act === 'ban') { await twitchBan(m.userId); toast(`${m.user} fue baneado.`); }
+    actions.close();
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$('#reply-cancel').addEventListener('click', clearReply);
+function clearReply() {
+  replyTarget = null;
+  $('#reply-bar').hidden = true;
+}
+
+/* =========================================================
+   Escribir mensajes
+   ========================================================= */
+function updateComposer() {
+  const logged = !!auth;
+  $('#send-form').hidden = !logged;
+  $('#login-cta').hidden = logged;
+  if (!logged) clearReply();
+}
+
+$('#login-cta').addEventListener('click', () => {
+  if (cfg.twitchClientId) twitchLogin();
+  else openSettings();
+});
+
+$('#send-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = $('#input');
+  const text = input.value.trim();
+  if (!text) return;
+  const btn = $('#send-btn');
+  btn.disabled = true;
+  try {
+    await twitchSend(text, replyTarget && replyTarget.id);
+    input.value = '';
+    clearReply();
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    btn.disabled = false;
+    input.focus();
+  }
+});
+
+/* =========================================================
+   Ajustes
+   ========================================================= */
+const settings = $('#settings');
+const form = $('#settings-form');
+
+function openSettings() {
+  for (const el of form.elements) {
+    if (!el.name || !(el.name in cfg)) continue;
+    if (el.type === 'checkbox') el.checked = !!cfg[el.name];
+    else el.value = cfg[el.name];
+  }
+  $('#redirect-url').textContent = redirectUrl();
+  updateAuthUi();
+  settings.showModal();
+}
+
+function updateAuthUi() {
+  $('#auth-status').textContent = auth ? 'Conectado como ' + auth.login : 'Sin sesión';
+  $('#btn-login').hidden = !!auth;
+  $('#btn-logout').hidden = !auth;
+}
+
+// Vista previa del tamaño de letra mientras se mueve el control
+form.elements.fontSize.addEventListener('input', (e) => {
+  document.documentElement.style.setProperty('--fs', e.target.value + 'px');
+});
+
+settings.addEventListener('close', () => {
+  if (settings.returnValue !== 'save') { applyView(); return; }
+
+  const before = { ...cfg };
+  for (const el of form.elements) {
+    if (!el.name || !(el.name in cfg)) continue;
+    if (el.type === 'checkbox') cfg[el.name] = el.checked;
+    else if (el.type === 'range') cfg[el.name] = Number(el.value);
+    else cfg[el.name] = el.value.trim();
+  }
+  saveCfg();
+  applyView();
+  updateWakeLock();
+
+  if (before.twitchChannel !== cfg.twitchChannel) { twitchRoomId = null; connectTwitch(); }
+  if (['kickChannel', 'kickChatroomId'].some((k) => before[k] !== cfg[k])) connectKick();
+  if (before.twitchClientId !== cfg.twitchClientId && auth) twitchLogout();
+});
+
+$('#btn-settings').addEventListener('click', openSettings);
+$('#btn-login').addEventListener('click', () => {
+  // Guarda el Client ID escrito antes de salir hacia Twitch
+  cfg.twitchClientId = form.elements.twitchClientId.value.trim();
+  saveCfg();
+  twitchLogin();
+});
+$('#btn-logout').addEventListener('click', twitchLogout);
+$('#btn-clear').addEventListener('click', () => { feed.replaceChildren(); });
+
+// Tocar un chip muestra u oculta esa plataforma
+for (const chip of document.querySelectorAll('.chip')) {
+  chip.addEventListener('click', () => {
+    const key = chip.dataset.platform === 'twitch' ? 'showTwitch' : 'showKick';
+    cfg[key] = !cfg[key];
+    saveCfg();
+    applyView();
+  });
+}
+
+/* =========================================================
+   Pantalla siempre encendida
+   ========================================================= */
+let wakeLock = null;
+async function updateWakeLock() {
+  try {
+    if (cfg.wakeLock && document.visibilityState === 'visible' && 'wakeLock' in navigator) {
+      if (!wakeLock) {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+      }
+    } else if (wakeLock) {
+      await wakeLock.release();
+      wakeLock = null;
+    }
+  } catch { /* no soportado o denegado */ }
+}
+document.addEventListener('visibilitychange', updateWakeLock);
+
+/* =========================================================
+   Inicio
+   ========================================================= */
+async function init() {
+  applyView();
+  updateAuthUi();
+  await handleAuthRedirect();
+  if (auth) validateToken(auth.token); // revisa que el token siga vigente
+
+  connectTwitch();
+  connectKick();
+  updateWakeLock();
+
+  if (!cfg.twitchChannel && !cfg.kickChannel) {
+    addSystem('twitch', '¡Bienvenido a Chat M! Toca ⚙ para poner tus canales de Twitch y Kick.', true);
+  }
+
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+}
+
+init();
