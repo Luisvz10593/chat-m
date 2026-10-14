@@ -18,6 +18,13 @@ Chat unificado de **Twitch + Kick + Starvios** para la tablet, pensado para usar
 - Escribe en cualquier plataforma donde iniciaste sesión (selector junto al campo de texto).
 - **Todos:** en el selector para escribir, envía el mismo mensaje a todos los canales a la vez.
 - Los mensajes se ordenan por la hora en que se escribieron, sin importar la plataforma.
+- **Eventos destacados:**
+  - Twitch: subs, renovaciones, regalos, raids, anuncios y bits (por el chat), más
+    **follows** (tu canal y donde eres moderador) y **canjes de puntos** (tu canal),
+    que necesitan haber iniciado sesión con Twitch.
+  - Starvios: subs, regalos, raids, recompensas, donaciones de Starvies, TTS y confeti.
+  - Kick: su API pública no da eventos (solo los manda a un servidor por webhooks),
+    así que por ahora no aparecen.
 - **🎬 Directo:** cambia título, categoría y tags de tu directo en una plataforma o en
   varias a la vez. Tiene 12 categorías favoritas (búscalas y toca ☆) y las 3 recientes:
   tocar una cambia la categoría al momento. Starvios no permite tags.

@@ -77,7 +77,10 @@ const TWITCH_SCOPES = [
   'moderator:manage:chat_messages',
   'moderator:manage:banned_users',
   'channel:manage:broadcast', // título, categoría y tags del directo
+  'moderator:read:followers', // eventos: follows (tu canal y donde eres mod)
+  'channel:read:redemptions', // eventos: canjes de puntos (tu canal)
 ].join(' ');
+const twitchMissingScopes = () => !!auth && TWITCH_SCOPES.split(' ').some((s) => !(auth.scopes || []).includes(s));
 
 const MAX_MESSAGES = 400;
 
@@ -231,6 +234,7 @@ function addMessage(m) {
 
   const plain = m.parts.map((p) => p.text || p.alt).join('').toLowerCase();
   if (myNames().some((n) => plain.includes('@' + n))) el.classList.add('mention');
+  if (m.event) el.classList.add('event'); // bits, donaciones…
 
   el.append(time, content);
   el.addEventListener('click', () => {
@@ -384,6 +388,7 @@ function handleIrc(ws, msg) {
       if (tags['room-id']) twitchRooms[ch] = tags['room-id'];
       twitchRetry = 0;
       setStatus(srcKey('twitch', ch), 'ok', 'Twitch');
+      subscribeEventSub(ch); // follows y canjes de este canal, si hay sesión
       break;
     case 'PRIVMSG':
       handleTwitchMsg(tags, msg.prefix, trailing || '', ch);
@@ -396,8 +401,10 @@ function handleIrc(ws, msg) {
       else addSystem('twitch', 'El chat de Twitch fue limpiado por un moderador.', false, ch);
       break;
     case 'USERNOTICE': {
-      const sys = tags['system-msg'] || '';
-      addSystem('twitch', sys + (trailing ? ' — ' + trailing : ''), true, ch);
+      // Subs, resubs, regalos, raids, anuncios…: ícono según el tipo de evento
+      const icon = TWITCH_EVENT_ICONS[tags['msg-id']] || '✨';
+      const sys = twitchEventText(tags);
+      addSystem('twitch', `${icon} ${sys}${trailing ? ' — ' + trailing : ''}`, true, ch);
       break;
     }
     case 'NOTICE':
@@ -409,6 +416,35 @@ function handleIrc(ws, msg) {
     case 'RECONNECT':
       connectTwitch();
       break;
+  }
+}
+
+const TWITCH_EVENT_ICONS = {
+  sub: '⭐', resub: '⭐', subgift: '🎁', submysterygift: '🎁', giftpaidupgrade: '⭐',
+  anongiftpaidupgrade: '⭐', primepaidupgrade: '⭐', raid: '🚀', announcement: '📣',
+  bitsbadgetier: '💎', viewermilestone: '🔥', communitypayforward: '🎁', standardpayforward: '🎁',
+};
+
+// Twitch manda los avisos en inglés: traducimos los más comunes con sus datos
+function twitchEventText(tags) {
+  const who = tags['display-name'] || tags.login || 'Alguien';
+  const plan = { 1000: 'Nivel 1', 2000: 'Nivel 2', 3000: 'Nivel 3', Prime: 'Prime' }[tags['msg-param-sub-plan']] || '';
+  const months = Number(tags['msg-param-cumulative-months']) || 0;
+  switch (tags['msg-id']) {
+    case 'sub':
+      return `${who} se suscribió${plan ? ' (' + plan + ')' : ''}`;
+    case 'resub':
+      return `${who} renovó su suscripción${plan ? ' (' + plan + ')' : ''}${months ? ` · ${months} meses` : ''}`;
+    case 'subgift':
+      return `${who} regaló una suscripción a ${tags['msg-param-recipient-display-name'] || 'alguien'}`;
+    case 'submysterygift':
+      return `${who} regaló ${tags['msg-param-mass-gift-count'] || 'varias'} suscripciones a la comunidad`;
+    case 'raid':
+      return `Raid de ${tags['msg-param-displayName'] || who} con ${tags['msg-param-viewerCount'] || '?'} espectadores`;
+    case 'announcement':
+      return `Anuncio de ${who}`;
+    default:
+      return tags['system-msg'] || '';
   }
 }
 
@@ -425,6 +461,10 @@ function handleTwitchMsg(tags, prefix, text, channel) {
     tags.emotes = shiftEmotes(tags.emotes, cut);
   }
 
+  const parts = twitchParts(text, tags.emotes);
+  const bits = Number(tags.bits) || 0;
+  if (bits) parts.unshift({ text: `💎 ${bits} bits · ` });
+
   addMessage({
     platform: 'twitch',
     channel,
@@ -434,7 +474,8 @@ function handleTwitchMsg(tags, prefix, text, channel) {
     login: prefix.split('!')[0],
     color: tags.color,
     badges: [...new Set(badges)],
-    parts: twitchParts(text, tags.emotes),
+    parts,
+    event: bits > 0,
     time: tags['tmi-sent-ts'] ? new Date(Number(tags['tmi-sent-ts'])) : new Date(),
     action,
     replyTo,
@@ -511,6 +552,7 @@ function twitchLogin() {
 function twitchLogout() {
   auth = null;
   store.set('auth', null);
+  closeEventSub();
   updateAuthUi();
   updateComposer();
   toast('Sesión de Twitch cerrada.');
@@ -542,6 +584,7 @@ async function validateToken(token) {
     if (auth && auth.token === token) {
       auth = null;
       store.set('auth', null);
+      closeEventSub();
       toast('Tu sesión de Twitch expiró. Inicia sesión de nuevo.', true);
     }
     return false;
@@ -595,6 +638,84 @@ async function twitchBan(ch, userId, duration) {
   await helix('POST', 'moderation/bans', {
     broadcaster_id: requireRoom(ch), moderator_id: auth.userId,
   }, { data });
+}
+
+/* =========================================================
+   TWITCH — eventos por EventSub (WebSocket oficial)
+   Follows: en tu canal y en los que eres moderador.
+   Canjes de puntos: solo en tu canal (Twitch no los da a mods).
+   Subs, regalos, raids y bits ya llegan por el chat (IRC).
+   ========================================================= */
+const ES_URL = 'wss://eventsub.wss.twitch.tv/ws';
+let esGen = 0;
+let esWs = null;
+let esSession = null;
+const esSubscribed = new Set();
+
+function closeEventSub() {
+  esGen++;
+  if (esWs) { esWs.onclose = null; esWs.close(); }
+  esWs = null;
+  esSession = null;
+  esSubscribed.clear();
+}
+
+// reconnectUrl: Twitch pide mudarse a otra conexión; las suscripciones se conservan
+function connectEventSub(reconnectUrl) {
+  if (!reconnectUrl) closeEventSub();
+  if (!auth || !channelsOf('twitch').length) return;
+  const gen = ++esGen;
+  const ws = new WebSocket(reconnectUrl || ES_URL);
+  ws.onmessage = (e) => {
+    if (gen !== esGen) return;
+    let msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+    const type = msg.metadata && msg.metadata.message_type;
+    if (type === 'session_welcome') {
+      const old = esWs;
+      esWs = ws;
+      esSession = msg.payload.session.id;
+      if (old && old !== ws) { old.onclose = null; old.close(); }
+      if (!reconnectUrl) for (const ch of channelsOf('twitch')) subscribeEventSub(ch);
+    } else if (type === 'session_reconnect') {
+      connectEventSub(msg.payload.session.reconnect_url);
+    } else if (type === 'notification') {
+      handleEventSub(msg.payload.subscription.type, msg.payload.event);
+    }
+  };
+  ws.onclose = () => {
+    if (gen !== esGen) return;
+    esSession = null;
+    setTimeout(() => { if (gen === esGen) connectEventSub(); }, 10000);
+  };
+}
+
+async function subscribeEventSub(ch) {
+  const room = twitchRooms[ch];
+  if (!esSession || !room || !auth) return;
+  const subs = [['channel.follow', '2', { broadcaster_user_id: room, moderator_user_id: auth.userId }, 'moderator:read:followers']];
+  if (room === auth.userId) {
+    subs.push(['channel.channel_points_custom_reward_redemption.add', '1', { broadcaster_user_id: room }, 'channel:read:redemptions']);
+  }
+  for (const [type, version, condition, scope] of subs) {
+    const key = type + ':' + room;
+    if (esSubscribed.has(key) || !(auth.scopes || []).includes(scope)) continue;
+    esSubscribed.add(key);
+    try {
+      await helix('POST', 'eventsub/subscriptions', null,
+        { type, version, condition, transport: { method: 'websocket', session_id: esSession } });
+    } catch { /* no eres moderador de ese canal: ahí no llegan follows */ }
+  }
+}
+
+function handleEventSub(type, ev) {
+  const ch = ev.broadcaster_user_login;
+  if (type === 'channel.follow') {
+    addSystem('twitch', `❤️ ${ev.user_name} empezó a seguir el canal`, true, ch);
+  } else if (type === 'channel.channel_points_custom_reward_redemption.add') {
+    const r = ev.reward || {};
+    addSystem('twitch', `🏆 ${ev.user_name} canjeó "${r.title}" (${r.cost} puntos)${ev.user_input ? ' — ' + ev.user_input : ''}`, true, ch);
+  }
 }
 
 /* =========================================================
@@ -889,7 +1010,8 @@ const SV_FIELDS = 'id,user_id,body,coins,kind,meta,badges,is_deleted,created_at,
   + 'profiles:profiles!live_chat_messages_user_id_fkey(username,display_name,chat_color)';
 const SV_POLL_MS = 2000;
 const SV_EVENTS = { sub: '⭐ se suscribió', gift_sub: '🎁 regaló suscripciones', gift: '🎁 regalo',
-  raid: '🚀 raid', reward: '🏆 canjeó una recompensa', starfall: '🌠 lluvia de estrellas', highlight: '✨ mensaje destacado' };
+  raid: '🚀 raid', reward: '🏆 canjeó una recompensa', starfall: '🌠 lluvia de estrellas', highlight: '✨ mensaje destacado',
+  tts: '🔊 mensaje de voz (TTS)', confetti: '🎉 lanzó confeti', custom: '✨ evento' };
 
 let svGen = 0;
 const svTimers = new Map(); // canal → temporizador de su consulta
@@ -998,6 +1120,7 @@ function handleStarviosMsg(d, channel) {
     color: p.chat_color,
     badges: [...new Set(badges)],
     parts,
+    event: d.coins > 0,
     time: new Date(d.created_at),
   });
   if (d.is_deleted) markDeleted('starvios', d.id);
@@ -1303,8 +1426,17 @@ function updateAuthUi() {
     ['kick', kickAuth && (kickAuth.name || 'tu cuenta')],
     ['starvios', svAuth && (svAuth.email || 'tu cuenta')],
   ];
+  // Sesiones iniciadas antes de agregar funciones nuevas no tienen sus permisos
+  const outdated = {
+    twitch: twitchMissingScopes(),
+    kick: !!kickAuth && (kickAuth.scope === undefined || (!!kickAuth.scope && !kickAuth.scope.includes('channel:write'))),
+    starvios: false,
+  };
   for (const [p, who] of rows) {
-    $(`#${p}-auth-status`).textContent = who ? 'Conectado como ' + who : 'Sin sesión';
+    const status = $(`#${p}-auth-status`);
+    status.textContent = who ? 'Conectado como ' + who : 'Sin sesión';
+    if (outdated[p]) status.textContent += ' — cierra sesión y vuelve a iniciarla para activar las funciones nuevas';
+    status.classList.toggle('warn', outdated[p]);
     $(`#${p}-login`).hidden = !!who;
     $(`#${p}-logout`).hidden = !who;
   }
@@ -1333,7 +1465,7 @@ settings.addEventListener('close', () => {
   applyView();
   updateWakeLock();
 
-  if (before.twitchChannel !== cfg.twitchChannel) connectTwitch();
+  if (before.twitchChannel !== cfg.twitchChannel) { connectTwitch(); connectEventSub(); }
   if (['kickChannel', 'kickChatroomId'].some((k) => before[k] !== cfg[k])) connectKick();
   if (before.starviosChannel !== cfg.starviosChannel) connectStarvios();
   if (before.twitchClientId !== cfg.twitchClientId && auth) twitchLogout();
@@ -1395,7 +1527,8 @@ async function init() {
   updateAuthUi();
   await handleAuthRedirect();
   await handleKickRedirect();
-  if (auth) validateToken(auth.token); // revisa que el token siga vigente
+  // Revisa que el token siga vigente y luego activa los eventos (follows, canjes)
+  if (auth) validateToken(auth.token).then((ok) => { if (ok) connectEventSub(); });
 
   connectTwitch();
   connectKick();

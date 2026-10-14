@@ -91,7 +91,12 @@ input { font: inherit; }
 .msg.mention { background: var(--mention); }
 .msg.deleted .body { opacity: .4; text-decoration: line-through; }
 .msg.system { color: var(--muted); font-style: italic; }
-.msg.system.highlight { color: #ffd54f; font-style: normal; }
+/* Eventos: subs, regalos, raids, bits, follows, canjes, donaciones */
+.msg.system.highlight, .msg.event {
+  color: #ffe08a; font-style: normal; font-weight: 600;
+  background: linear-gradient(90deg, rgba(255, 213, 79, .16), transparent 70%);
+}
+.msg.event .body { color: var(--text); font-weight: 400; }
 
 .msg .time { color: var(--muted); font-size: .7em; padding-top: .35em; flex: none; }
 body.hide-time .msg .time { display: none; }
