@@ -7,6 +7,7 @@
   --muted: #9a9aab;
   --twitch: #9146ff;
   --kick: #53fc18;
+  --starvios: #ffc83d;
   --danger: #ff4d5e;
   --mention: rgba(255, 196, 0, .14);
   --fs: 19px;
@@ -36,7 +37,8 @@ input { font: inherit; }
 }
 .brand { font-size: 20px; white-space: nowrap; }
 .brand b { color: var(--twitch); }
-.chips { display: flex; gap: 8px; flex: 1; overflow-x: auto; }
+.chips { display: flex; gap: 8px; flex: 1; overflow-x: auto; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
 .chip {
   display: flex; align-items: center; gap: 8px;
   min-height: 44px; padding: 6px 14px;
@@ -46,6 +48,7 @@ input { font: inherit; }
 }
 .chip.twitch[aria-pressed="true"] { border-color: var(--twitch); }
 .chip.kick[aria-pressed="true"]   { border-color: var(--kick); }
+.chip.starvios[aria-pressed="true"] { border-color: var(--starvios); }
 .chip[aria-pressed="false"] { opacity: .45; }
 .chip .state { color: var(--muted); font-size: 13px; }
 .dot { width: 10px; height: 10px; border-radius: 50%; background: #555; }
@@ -74,6 +77,7 @@ input { font: inherit; }
 }
 .msg.twitch { border-left-color: var(--twitch); }
 .msg.kick   { border-left-color: var(--kick); }
+.msg.starvios { border-left-color: var(--starvios); }
 .msg:active { background: var(--panel-2); }
 .msg.mention { background: var(--mention); }
 .msg.deleted .body { opacity: .4; text-decoration: line-through; }
@@ -100,7 +104,8 @@ body.hide-time .msg .time { display: none; }
 .pill.og          { background: #c58e00; }
 
 body.hide-twitch .msg.twitch,
-body.hide-kick .msg.kick { display: none; }
+body.hide-kick .msg.kick,
+body.hide-starvios .msg.starvios { display: none; }
 
 #jump {
   position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%);
@@ -158,6 +163,7 @@ dialog::backdrop { background: rgba(0,0,0,.6); }
 }
 .badge-platform.twitch { background: var(--twitch); }
 .badge-platform.kick { background: var(--kick); color: #000; }
+.badge-platform.starvios { background: var(--starvios); color: #000; }
 .act-text { margin: 0; color: var(--muted); max-height: 6em; overflow: auto; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .grid button, .close, .sheet .row button {

@@ -1,17 +1,18 @@
 # Chat M
 
-Chat unificado de **Twitch + Kick** para la tablet, pensado para usarlo mientras transmites.
+Chat unificado de **Twitch + Kick + Starvios** para la tablet, pensado para usarlo mientras transmites.
 
-## Qué hace (fase 1)
+## Qué hace
 
-- Lee el chat de Twitch y de Kick en una sola lista (borde morado = Twitch, verde = Kick).
-- Emotes, insignias (STREAMER / MOD / VIP / SUB) y avisos de subs y raids.
-- Resalta en amarillo los mensajes que te mencionan.
-- Toca **Twitch** o **Kick** arriba para ocultar o mostrar esa plataforma.
-- Toca un mensaje para **responder, mencionar, borrar, dar timeout o banear** (en Twitch).
+- Lee los chats de Twitch, Kick y Starvios en una sola lista
+  (borde morado = Twitch, verde = Kick, amarillo = Starvios).
+- Emotes (Twitch y Kick), insignias (STREAMER / MOD / VIP / SUB), avisos de subs, raids y donaciones de Starvies.
+- Resalta los mensajes que te mencionan.
+- Toca el nombre de una plataforma arriba para ocultarla o mostrarla.
+- Toca un mensaje para **responder, mencionar, borrar, dar timeout o banear** (por ahora solo en Twitch).
 - Mantiene la pantalla de la tablet encendida.
 
-Pendiente (fase 2): responder y moderar en Kick, e integrar Starvios.
+Pendiente: responder y moderar en Kick y en Starvios.
 
 ---
 
@@ -60,6 +61,13 @@ conexiones desde kick.com. Por eso Chat M pide los últimos 25 mensajes cada
 2 segundos. En chats muy rápidos (más de ~12 mensajes por segundo) se pueden
 saltar algunos; en un canal normal no pasa. Los mensajes que borra un moderador
 se tachan unos segundos después.
+
+## Cómo lee el chat de Starvios
+
+Starvios no tiene API documentada. Chat M usa los mismos datos públicos que
+usa su página web (la tabla de mensajes del directo), consultándolos cada
+2 segundos. Si Starvios cambia su web, esta parte podría dejar de funcionar
+hasta actualizarla.
 
 ## Kick: si no se detecta el chat
 

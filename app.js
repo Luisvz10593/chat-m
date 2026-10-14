@@ -1,7 +1,7 @@
 'use strict';
 
 /* =========================================================
-   Chat M — chat unificado de Twitch + Kick para tablet
+   Chat M — chat unificado de Twitch + Kick + Starvios para tablet
    ========================================================= */
 
 const $ = (s) => document.querySelector(s);
@@ -20,6 +20,7 @@ const store = {
 const DEFAULTS = {
   twitchChannel: '',
   kickChannel: '',
+  starviosChannel: '',
   twitchClientId: '',
   kickChatroomId: '',
   fontSize: 19,
@@ -27,7 +28,12 @@ const DEFAULTS = {
   wakeLock: true,
   showTwitch: true,
   showKick: true,
+  showStarvios: true,
 };
+
+const PLATFORMS = ['twitch', 'kick', 'starvios'];
+const PLATFORM_NAMES = { twitch: 'Twitch', kick: 'Kick', starvios: 'Starvios' };
+const showKey = (p) => 'show' + p[0].toUpperCase() + p.slice(1);
 const cfg = Object.assign({}, DEFAULTS, store.get('cfg', {}));
 let auth = store.get('auth', null); // { token, login, userId }
 
@@ -59,10 +65,10 @@ function setStatus(platform, status, text) {
 function applyView() {
   document.documentElement.style.setProperty('--fs', cfg.fontSize + 'px');
   document.body.classList.toggle('hide-time', !cfg.showTime);
-  document.body.classList.toggle('hide-twitch', !cfg.showTwitch);
-  document.body.classList.toggle('hide-kick', !cfg.showKick);
-  $('#chip-twitch').setAttribute('aria-pressed', String(cfg.showTwitch));
-  $('#chip-kick').setAttribute('aria-pressed', String(cfg.showKick));
+  for (const p of PLATFORMS) {
+    document.body.classList.toggle('hide-' + p, !cfg[showKey(p)]);
+    $('#chip-' + p).setAttribute('aria-pressed', String(cfg[showKey(p)]));
+  }
   updateComposer();
 }
 
@@ -190,11 +196,13 @@ const BADGE_LABELS = {
   broadcaster: 'STREAMER', moderator: 'MOD', vip: 'VIP',
   subscriber: 'SUB', founder: 'SUB', og: 'OG', verified: '✔',
 };
+// Nombres de insignias de otras plataformas → los de arriba
+const BADGE_ALIASES = { owner: 'broadcaster', mod: 'moderator', sub: 'subscriber' };
 
 // Evita nombres ilegibles sobre fondo oscuro
 function readableColor(color, platform) {
   if (!color || !/^#[0-9a-f]{6}$/i.test(color)) {
-    return platform === 'kick' ? '#53fc18' : '#bf94ff';
+    return { kick: '#53fc18', starvios: '#ffc83d' }[platform] || '#bf94ff';
   }
   const n = parseInt(color.slice(1), 16);
   const r = n >> 16, g = (n >> 8) & 255, b = n & 255;
@@ -603,6 +611,127 @@ function kickParts(text) {
 }
 
 /* =========================================================
+   STARVIOS — lectura por su API pública (Supabase)
+   Starvios no tiene API documentada: estos son los mismos
+   datos públicos que usa su web, así que pueden cambiar.
+   ========================================================= */
+const SV_URL = 'https://naiijcvngtkkocligwvk.supabase.co/rest/v1/';
+const SV_KEY = 'sb_publishable_4lF1QyQhWOUE1Pw3rWBwEw_bVmkAxm6'; // clave pública de su web
+const SV_FIELDS = 'id,user_id,body,coins,kind,meta,badges,is_deleted,created_at,'
+  + 'profiles:profiles!live_chat_messages_user_id_fkey(username,display_name,chat_color)';
+const SV_POLL_MS = 2000;
+const SV_EVENTS = { sub: '⭐ se suscribió', gift_sub: '🎁 regaló suscripciones', gift: '🎁 regalo',
+  raid: '🚀 raid', reward: '🏆 canjeó una recompensa', starfall: '🌠 lluvia de estrellas', highlight: '✨ mensaje destacado' };
+
+let svGen = 0;
+let svTimer = null;
+let svStream = null;   // { id, channelId }
+let svLast = null;     // created_at del último mensaje recibido
+let svPolls = 0;
+const svSeen = new Set();
+
+async function svGet(path) {
+  const r = await fetch(SV_URL + path, { headers: { apikey: SV_KEY }, cache: 'no-store' });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+async function connectStarvios() {
+  const gen = ++svGen;
+  clearTimeout(svTimer);
+  svStream = null;
+  svLast = null;
+  const name = cfg.starviosChannel.trim().toLowerCase().replace(/^@/, '');
+  if (!name) { setStatus('starvios', 'off', 'sin canal'); return; }
+
+  setStatus('starvios', 'wait', 'conectando…');
+  try {
+    const [profile] = await svGet('profiles?select=id&username=eq.' + encodeURIComponent(name));
+    if (!profile) throw new Error('no existe');
+    const [stream] = await svGet('live_streams?select=id,started_at,chat_cleared_at&order=started_at.desc&limit=1&channel_id=eq.' + profile.id);
+    if (!stream) throw new Error('sin directos');
+    if (gen !== svGen) return;
+    svStream = { id: stream.id, channelId: profile.id };
+    // Empieza desde el inicio del directo actual (o la última limpieza del chat)
+    svLast = [stream.started_at, stream.chat_cleared_at].filter(Boolean).sort().pop() || new Date().toISOString();
+    const recent = await svGet(`live_chat_messages?select=${SV_FIELDS}&stream_id=eq.${stream.id}`
+      + `&created_at=gt.${encodeURIComponent(svLast)}&order=created_at.desc&limit=30`);
+    if (gen !== svGen) return;
+    recent.reverse().forEach(handleStarviosMsg);
+  } catch (e) {
+    if (gen !== svGen) return;
+    setStatus('starvios', 'err', e.message === 'no existe' ? 'canal no existe' : 'reintentando…');
+    if (e.message !== 'no existe') svTimer = setTimeout(connectStarvios, 10000);
+    return;
+  }
+
+  let fails = 0;
+  const poll = async () => {
+    if (gen !== svGen) return;
+    try {
+      const rows = await svGet(`live_chat_messages?select=${SV_FIELDS}&stream_id=eq.${svStream.id}`
+        + `&created_at=gt.${encodeURIComponent(svLast)}&order=created_at.asc&limit=100`);
+      if (gen !== svGen) return;
+      rows.forEach(handleStarviosMsg);
+      // Cada ~10 s revisa qué mensajes borraron los moderadores
+      if (++svPolls % 5 === 0) await svCheckDeleted(gen);
+      fails = 0;
+      setStatus('starvios', 'ok', cfg.starviosChannel.toLowerCase());
+    } catch {
+      if (gen !== svGen) return;
+      fails++;
+      setStatus('starvios', 'err', 'reintentando…');
+    }
+    svTimer = setTimeout(poll, fails ? Math.min(30000, SV_POLL_MS * 2 ** fails) : SV_POLL_MS);
+  };
+  poll();
+}
+
+async function svCheckDeleted(gen) {
+  const shown = feed.querySelector('.msg.starvios[data-id]:not(.deleted)');
+  if (!shown || !shown._msg) return;
+  const since = shown._msg.time.toISOString();
+  const rows = await svGet(`live_chat_messages?select=id&stream_id=eq.${svStream.id}`
+    + `&is_deleted=eq.true&created_at=gte.${encodeURIComponent(since)}`);
+  if (gen !== svGen) return;
+  rows.forEach((r) => markDeleted('starvios', r.id));
+}
+
+function handleStarviosMsg(d) {
+  if (!d || !d.id) return;
+  if (d.created_at > svLast) svLast = d.created_at;
+  if (svSeen.has(d.id)) return;
+  svSeen.add(d.id);
+  if (svSeen.size > 3000) svSeen.delete(svSeen.values().next().value);
+
+  const p = d.profiles || {};
+  const user = p.display_name || p.username || '?';
+  const body = d.body || '';
+
+  if (d.kind && d.kind !== 'chat' && SV_EVENTS[d.kind]) {
+    addSystem('starvios', `${user} ${SV_EVENTS[d.kind]}${body ? ' — ' + body : ''}`, true);
+    return;
+  }
+
+  const badges = (d.badges || []).map((b) => BADGE_ALIASES[b] || b).filter((b) => BADGE_LABELS[b]);
+  const parts = [{ text: body }];
+  if (d.coins > 0) parts.unshift({ text: `⭐ ${d.coins} Starvies · ` });
+
+  addMessage({
+    platform: 'starvios',
+    id: d.id,
+    userId: d.user_id,
+    user,
+    login: p.username,
+    color: p.chat_color,
+    badges: [...new Set(badges)],
+    parts,
+    time: new Date(d.created_at),
+  });
+  if (d.is_deleted) markDeleted('starvios', d.id);
+}
+
+/* =========================================================
    Acciones sobre mensajes
    ========================================================= */
 const actions = $('#actions');
@@ -613,7 +742,7 @@ function openActions(m) {
   current = m;
   const plat = $('#act-platform');
   plat.className = 'badge-platform ' + m.platform;
-  plat.textContent = m.platform === 'twitch' ? 'Twitch' : 'Kick';
+  plat.textContent = PLATFORM_NAMES[m.platform];
   $('#act-user').textContent = m.user;
   $('#act-text').textContent = m.parts.map((p) => p.text || p.alt).join('');
 
@@ -622,7 +751,7 @@ function openActions(m) {
   const note = $('#act-note');
   if (!isTwitch) {
     note.hidden = false;
-    note.textContent = 'Responder y moderar en Kick llegará en la fase 2. Por ahora usa “Mencionar” para escribirle desde Twitch.';
+    note.textContent = `Responder y moderar en ${PLATFORM_NAMES[m.platform]} todavía no está disponible. Por ahora usa “Mencionar” para escribirle desde Twitch.`;
   } else if (!auth) {
     note.hidden = false;
     note.textContent = 'Inicia sesión con Twitch (Ajustes) para responder y moderar.';
@@ -759,6 +888,7 @@ settings.addEventListener('close', () => {
 
   if (before.twitchChannel !== cfg.twitchChannel) { twitchRoomId = null; connectTwitch(); }
   if (['kickChannel', 'kickChatroomId'].some((k) => before[k] !== cfg[k])) connectKick();
+  if (before.starviosChannel !== cfg.starviosChannel) connectStarvios();
   if (before.twitchClientId !== cfg.twitchClientId && auth) twitchLogout();
 });
 
@@ -775,7 +905,7 @@ $('#btn-clear').addEventListener('click', () => { feed.replaceChildren(); });
 // Tocar un chip muestra u oculta esa plataforma
 for (const chip of document.querySelectorAll('.chip')) {
   chip.addEventListener('click', () => {
-    const key = chip.dataset.platform === 'twitch' ? 'showTwitch' : 'showKick';
+    const key = showKey(chip.dataset.platform);
     cfg[key] = !cfg[key];
     saveCfg();
     applyView();
@@ -812,10 +942,11 @@ async function init() {
 
   connectTwitch();
   connectKick();
+  connectStarvios();
   updateWakeLock();
 
   if (!cfg.twitchChannel && !cfg.kickChannel) {
-    addSystem('twitch', '¡Bienvenido a Chat M! Toca ⚙ para poner tus canales de Twitch y Kick.', true);
+    addSystem('twitch', '¡Bienvenido a Chat M! Toca ⚙ para poner tus canales de Twitch, Kick y Starvios.', true);
   }
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
