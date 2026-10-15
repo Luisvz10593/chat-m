@@ -196,6 +196,17 @@ function addMessage(m) {
   content.className = 'content';
   content.append(chanTag(m.channel));
 
+  // Chat compartido: de qué canal viene el mensaje
+  if (m.shared) {
+    const sh = document.createElement('span');
+    sh.className = 'shared';
+    sh.dataset.room = m.shared.roomId;
+    sh.title = 'Mensaje del chat compartido de otro canal';
+    sh.textContent = '🤝 ' + (m.shared.name || 'chat compartido');
+    content.append(sh);
+    el.classList.add('from-shared');
+  }
+
   if (m.replyTo) {
     const ref = document.createElement('span');
     ref.className = 'reply-ref';
@@ -394,17 +405,25 @@ function handleIrc(ws, msg) {
       handleTwitchMsg(tags, msg.prefix, trailing || '', ch);
       break;
     case 'CLEARMSG':
+      // Puede referirse a una copia del chat compartido que no mostramos
       markDeleted('twitch', tags['target-msg-id']);
+      markDeleted('twitch', twAlias.get(tags['target-msg-id']));
       break;
     case 'CLEARCHAT':
       if (trailing) markUserCleared('twitch', ch, trailing);
       else addSystem('twitch', 'El chat de Twitch fue limpiado por un moderador.', false, ch);
       break;
     case 'USERNOTICE': {
+      if (twDuplicate(tags)) break; // el mismo evento llegó por otro canal del chat compartido
+      // En chat compartido llega como "sharedchatnotice" y el tipo real va en "source-msg-id"
+      const shared = tags['msg-id'] === 'sharedchatnotice' || isSharedTw(tags);
+      const t = tags['msg-id'] === 'sharedchatnotice' ? { ...tags, 'msg-id': tags['source-msg-id'] } : tags;
       // Subs, resubs, regalos, raids, anuncios…: ícono según el tipo de evento
-      const icon = TWITCH_EVENT_ICONS[tags['msg-id']] || '✨';
-      const sys = twitchEventText(tags);
-      addSystem('twitch', `${icon} ${sys}${trailing ? ' — ' + trailing : ''}`, true, ch);
+      const icon = TWITCH_EVENT_ICONS[t['msg-id']] || '✨';
+      const sys = twitchEventText(t);
+      const from = shared ? twRoomName(tags['source-room-id']) : null;
+      const origin = shared ? ` (en ${from ? from : 'el chat compartido'})` : '';
+      addSystem('twitch', `${icon} ${sys}${origin}${trailing ? ' — ' + trailing : ''}`, true, ch);
       break;
     }
     case 'NOTICE':
@@ -448,11 +467,59 @@ function twitchEventText(tags) {
   }
 }
 
+/* ---------- Chat compartido de Twitch (Stream Together) ----------
+ * Twitch reenvía los mensajes de los demás canales de la sesión a cada canal
+ * participante, con "source-room-id" (canal de origen) y "source-id" (id del
+ * mensaje original). Con eso: mostramos de qué canal viene, evitamos verlo
+ * repetido si tienes varios de esos canales, usamos las insignias del canal
+ * de origen y moderamos el mensaje original.
+ */
+const twKept = new Map();   // id original → id del mensaje que se dejó en pantalla
+const twAlias = new Map();  // id de una copia descartada → id del que se dejó
+const twRoomNames = store.get('twRoomNames', {});
+const twNameLookups = new Map();
+
+const isSharedTw = (tags) => !!tags['source-room-id'] && tags['source-room-id'] !== tags['room-id'];
+
+// true si este mensaje ya se mostró (copia de otro canal de la sesión compartida)
+function twDuplicate(tags) {
+  const key = tags['source-id'] || tags.id;
+  if (!key) return false;
+  if (twKept.has(key)) {
+    if (tags.id) twAlias.set(tags.id, twKept.get(key));
+    return true;
+  }
+  twKept.set(key, tags.id);
+  if (twKept.size > 5000) twKept.delete(twKept.keys().next().value);
+  if (twAlias.size > 5000) twAlias.delete(twAlias.keys().next().value);
+  return false;
+}
+
+// Nombre del canal de origen a partir de su id
+function twRoomName(roomId) {
+  for (const [ch, id] of Object.entries(twitchRooms)) if (id === roomId) return ch;
+  if (twRoomNames[roomId]) return twRoomNames[roomId];
+  if (auth && !twNameLookups.has(roomId)) {
+    twNameLookups.set(roomId, helix('GET', 'users', { id: roomId }).then((j) => {
+      const login = j.data && j.data[0] && j.data[0].login;
+      if (!login) return;
+      twRoomNames[roomId] = login;
+      store.set('twRoomNames', twRoomNames);
+      for (const s of feed.querySelectorAll(`.shared[data-room="${CSS.escape(roomId)}"]`)) s.textContent = '🤝 ' + login;
+    }).catch(() => {}));
+  }
+  return null;
+}
+
 function handleTwitchMsg(tags, prefix, text, channel) {
+  if (twDuplicate(tags)) return;
+  const shared = isSharedTw(tags);
   let action = false;
   if (text.startsWith('\x01ACTION ')) { action = true; text = text.slice(8).replace(/\x01$/, ''); }
 
-  const badges = (tags.badges || '').split(',').map((b) => b.split('/')[0]).filter((b) => BADGE_LABELS[b]);
+  // En chat compartido, las insignias que importan son las del canal de origen
+  const badgeTag = shared && tags['source-badges'] != null ? tags['source-badges'] : tags.badges;
+  const badges = (badgeTag || '').split(',').map((b) => b.split('/')[0]).filter((b) => BADGE_LABELS[b]);
   const replyTo = tags['reply-parent-display-name'] || null;
   // Twitch antepone "@usuario " en las respuestas: lo quitamos porque ya mostramos la referencia
   if (replyTo && text.toLowerCase().startsWith('@' + replyTo.toLowerCase() + ' ')) {
@@ -479,6 +546,8 @@ function handleTwitchMsg(tags, prefix, text, channel) {
     time: tags['tmi-sent-ts'] ? new Date(Number(tags['tmi-sent-ts'])) : new Date(),
     action,
     replyTo,
+    sourceId: tags['source-id'] || null,
+    shared: shared ? { roomId: tags['source-room-id'], name: twRoomName(tags['source-room-id']) } : null,
   });
 }
 
@@ -626,7 +695,17 @@ async function twitchSend(ch, message, replyId) {
   if (res && !res.is_sent) throw new Error((res.drop_reason && res.drop_reason.message) || 'Twitch no envió el mensaje.');
 }
 
-async function twitchDelete(ch, messageId) {
+async function twitchDelete(ch, messageId, m) {
+  // Chat compartido: se borra el mensaje original en su canal (si eres mod ahí);
+  // si no se puede, se intenta borrar la copia del canal donde lo ves
+  if (m && m.shared && m.sourceId) {
+    try {
+      await helix('DELETE', 'moderation/chat', {
+        broadcaster_id: m.shared.roomId, moderator_id: auth.userId, message_id: m.sourceId,
+      });
+      return;
+    } catch { /* sigue con la copia local */ }
+  }
   await helix('DELETE', 'moderation/chat', {
     broadcaster_id: requireRoom(ch), moderator_id: auth.userId, message_id: messageId,
   });
@@ -1225,7 +1304,7 @@ const PROVIDERS = {
   twitch: {
     logged: () => !!auth,
     send: (ch, text, reply) => twitchSend(ch, text, reply && reply.id),
-    del: (m) => twitchDelete(m.channel, m.id),
+    del: (m) => twitchDelete(m.channel, m.id, m),
     ban: (m, minutes) => twitchBan(m.channel, m.userId, minutes ? minutes * 60 : null),
   },
   kick: {
@@ -1259,8 +1338,17 @@ function openActions(m) {
 
   const canMod = PROVIDERS[m.platform].logged();
   const note = $('#act-note');
-  note.hidden = canMod;
-  note.textContent = `Inicia sesión con ${PLATFORM_NAMES[m.platform]} en ⚙ Ajustes para responder y moderar.`;
+  if (!canMod) {
+    note.hidden = false;
+    note.textContent = `Inicia sesión con ${PLATFORM_NAMES[m.platform]} en ⚙ Ajustes para responder y moderar.`;
+  } else if (m.shared) {
+    const from = twRoomName(m.shared.roomId) || 'otro canal';
+    note.hidden = false;
+    note.textContent = `🤝 Mensaje del chat compartido de ${from}. Borrar actúa sobre el mensaje original `
+      + `(si eres moderador ahí); timeout y ban se aplican en el canal ${m.channel}.`;
+  } else {
+    note.hidden = true;
+  }
 
   actions.querySelector('[data-act="reply"]').disabled = !canMod;
   actions.querySelector('[data-act="mention"]').disabled = false;

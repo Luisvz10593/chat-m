@@ -125,6 +125,14 @@ body.hide-time .msg .time { display: none; }
 }
 body.show-channel .msg .chan { display: inline; }
 
+/* Chat compartido de Twitch: mensaje que viene del chat de otro canal */
+.msg .shared {
+  display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 6px;
+  font-size: .65em; font-weight: 700; vertical-align: .15em;
+  background: rgba(145, 70, 255, .25); color: #d4bcff;
+}
+.msg.from-shared { border-left-style: dashed; }
+
 #jump {
   position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%);
   padding: 10px 20px; border: 0; border-radius: 999px;
