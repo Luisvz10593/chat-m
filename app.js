@@ -79,6 +79,17 @@ const TWITCH_SCOPES = [
   'channel:manage:broadcast', // título, categoría y tags del directo
   'moderator:read:followers', // eventos: follows (tu canal y donde eres mod)
   'channel:read:redemptions', // eventos: canjes de puntos (tu canal)
+  // Herramientas
+  'channel:manage:polls',
+  'channel:manage:predictions',
+  'moderator:manage:announcements',
+  'moderator:manage:shoutouts',
+  'moderator:manage:chat_settings',
+  'channel:manage:raids',
+  'channel:edit:commercial',
+  'channel:read:ads',
+  'channel:manage:ads',
+  'clips:edit',
 ].join(' ');
 const twitchMissingScopes = () => !!auth && TWITCH_SCOPES.split(' ').some((s) => !(auth.scopes || []).includes(s));
 
@@ -675,9 +686,16 @@ async function helix(method, path, params, body) {
     },
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (r.status === 401) { await validateToken(auth.token); throw new Error('Sesión expirada.'); }
   const text = await r.text();
-  const j = text ? JSON.parse(text) : {};
+  let j = {};
+  try { j = text ? JSON.parse(text) : {}; } catch { /* respuesta no JSON */ }
+  if (r.status === 401) {
+    // 401 puede ser sesión vencida o un permiso que la sesión no tiene todavía
+    const stillValid = await validateToken(auth.token);
+    throw new Error(stillValid
+      ? `Falta un permiso (${j.message || 'sin detalle'}). Cierra sesión de Twitch en ⚙ y vuelve a iniciarla.`
+      : 'Tu sesión de Twitch expiró.');
+  }
   if (!r.ok) throw new Error(j.message || 'Error ' + r.status);
   return j;
 }
@@ -932,7 +950,7 @@ function kickParts(text) {
    El Client Secret lo escribe el usuario en Ajustes y solo
    se guarda en este dispositivo (localStorage).
    ========================================================= */
-const KICK_SCOPES = 'user:read channel:read channel:write chat:write moderation:ban moderation:chat_message:manage';
+const KICK_SCOPES = 'user:read channel:read channel:write chat:write moderation:ban moderation:chat_message:manage ads:read ads:write';
 const KICK_API = 'https://api.kick.com/public/v1/';
 let kickAuth = store.get('kickAuth', null); // { access, refresh, expiresAt, userId, name }
 const kickBroadcasters = {};                // canal → broadcaster_user_id
@@ -1306,6 +1324,8 @@ const PROVIDERS = {
     send: (ch, text, reply) => twitchSend(ch, text, reply && reply.id),
     del: (m) => twitchDelete(m.channel, m.id, m),
     ban: (m, minutes) => twitchBan(m.channel, m.userId, minutes ? minutes * 60 : null),
+    // Fija el mensaje arriba del chat hasta que termine el directo
+    pin: (m) => helix('PUT', 'chat/pins', { broadcaster_id: requireRoom(m.channel), moderator_id: auth.userId, message_id: m.id }),
   },
   kick: {
     logged: () => !!kickAuth,
@@ -1318,6 +1338,7 @@ const PROVIDERS = {
     send: (ch, text, reply) => starviosSend(ch, text, reply && reply.id),
     del: (m) => starviosDelete(m.channel, m.id),
     ban: (m, minutes) => starviosBan(m.channel, m.userId, minutes),
+    pin: (m) => svAuthed('POST', 'rpc/pin_chat_message', { _id: m.id, _minutes: 30 }),
   },
 };
 
@@ -1353,6 +1374,7 @@ function openActions(m) {
   actions.querySelector('[data-act="reply"]').disabled = !canMod;
   actions.querySelector('[data-act="mention"]').disabled = false;
   for (const b of actions.querySelectorAll('.mod')) b.disabled = !canMod;
+  actions.querySelector('[data-act="pin"]').disabled = !canMod || !PROVIDERS[m.platform].pin;
   actions.showModal();
 }
 
@@ -1388,6 +1410,7 @@ actions.addEventListener('click', async (e) => {
   btn.disabled = true;
   try {
     if (act === 'delete') { await p.del(m); toast('Mensaje borrado.'); }
+    if (act === 'pin') { await p.pin(m); toast(`Mensaje fijado en ${name}.`); }
     if (act === 'timeout60') { await p.ban(m, 1); toast(`${m.user}: timeout de 1 min en ${name}.`); }
     if (act === 'timeout600') { await p.ban(m, 10); toast(`${m.user}: timeout de 10 min en ${name}.`); }
     if (act === 'ban') { await p.ban(m, null); toast(`${m.user} fue baneado de ${name}.`); }
@@ -1517,7 +1540,8 @@ function updateAuthUi() {
   // Sesiones iniciadas antes de agregar funciones nuevas no tienen sus permisos
   const outdated = {
     twitch: twitchMissingScopes(),
-    kick: !!kickAuth && (kickAuth.scope === undefined || (!!kickAuth.scope && !kickAuth.scope.includes('channel:write'))),
+    kick: !!kickAuth && (kickAuth.scope === undefined
+      || (!!kickAuth.scope && ['channel:write', 'ads:write'].some((s) => !kickAuth.scope.includes(s)))),
     starvios: false,
   };
   for (const [p, who] of rows) {

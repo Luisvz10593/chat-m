@@ -28,7 +28,25 @@ Chat unificado de **Twitch + Kick + Starvios** para la tablet, pensado para usar
 - **🎬 Directo:** cambia título, categoría y tags de tu directo en una plataforma o en
   varias a la vez. Tiene 12 categorías favoritas (búscalas y toca ☆) y las 3 recientes:
   tocar una cambia la categoría al momento. Starvios no permite tags.
+- **🧰 Herramientas** (lo que cada plataforma permite por API):
+
+  | Herramienta | Twitch | Kick | Starvios |
+  |---|---|---|---|
+  | 📊 Encuestas (votos en vivo, terminar) | Tu canal | ✗ | ✓ |
+  | 🔮 Predicciones (bloquear, ganador, cancelar) | Tu canal | ✗ | ✓ |
+  | 📣 Anuncios | Donde eres mod | ✗ | ✗ |
+  | 📍 Marcadores | Tu canal / editor | ✗ | ✗ |
+  | 📺 Publicidad (lanzar, posponer) | Tu canal | ✓ (≤ 90 s) | ✗ |
+  | 💬 Modos del chat | Donde eres mod | ✗ | ✓ |
+  | 🚀 Raid | Tu canal | ✗ | Tu canal |
+  | 📢 Shoutout | Donde eres mod | ✗ | ✗ |
+  | 🎬 Clips | ✓ | ✗ | ✗ |
+  | 📌 Fijar mensaje (menú del mensaje) | Donde eres mod | ✗ | ✓ |
+
 - Mantiene la pantalla de la tablet encendida.
+
+> Después de cada función nueva que pida permisos, ⚙ Ajustes muestra un aviso
+> amarillo: cierra sesión en esa plataforma y vuelve a iniciarla.
 
 > **Privacidad:** los Client ID, el Client Secret de Kick y las sesiones se guardan
 > **solo en el dispositivo** donde los escribes (no están en el código ni en GitHub).
@@ -69,8 +87,8 @@ Para leer el chat no hace falta iniciar sesión.
 2. **Redirect URL:** la misma URL que aparece en ⚙ Ajustes
    (`https://luisvz10593.github.io/chat-m/`, y `http://localhost:8080/` si pruebas en la PC).
 3. Activa los permisos: **Read user info**, **Read channel info**, **Write channel info**
-   (para 🎬 Directo), **Write to chat**, **Moderation: ban users** y
-   **Moderation: manage chat messages**.
+   (para 🎬 Directo), **Write to chat**, **Moderation: ban users**,
+   **Moderation: manage chat messages**, **Read ads** y **Write ads** (para 🧰 Publicidad).
 4. Copia el **Client ID** y el **Client Secret** y pégalos **en la tablet**, en
    ⚙ Ajustes → Cuenta de Kick. Toca **Iniciar sesión**.
 

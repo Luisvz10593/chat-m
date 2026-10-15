@@ -18,6 +18,7 @@
     <div class="brand">Chat <b>M</b></div>
     <!-- Un botón por canal; se generan desde app.js -->
     <div class="chips" id="chips"></div>
+    <button class="icon-btn" id="btn-tools" aria-label="Herramientas: encuestas, predicciones, anuncios y más" title="Herramientas">🧰</button>
     <button class="icon-btn" id="btn-stream" aria-label="Directo: título, categoría y tags" title="Directo">🎬</button>
     <button class="icon-btn" id="btn-settings" aria-label="Ajustes">⚙</button>
   </header>
@@ -52,6 +53,7 @@
         <button data-act="reply">↪ Responder</button>
         <button data-act="mention">@ Mencionar</button>
         <button data-act="delete" class="mod">🗑 Borrar mensaje</button>
+        <button data-act="pin" class="mod">📌 Fijar mensaje</button>
         <button data-act="timeout60" class="mod">⏱ Timeout 1 min</button>
         <button data-act="timeout600" class="mod">⏱ Timeout 10 min</button>
         <button data-act="ban" class="mod danger">⛔ Banear</button>
@@ -230,9 +232,25 @@
     </div>
   </dialog>
 
+  <!-- Herramientas: encuestas, predicciones, anuncios, marcadores, publicidad… -->
+  <dialog id="tools" class="stream-dialog">
+    <div class="sheet stream">
+      <header class="st-head">
+        <div>
+          <h2>Herramientas</h2>
+          <p class="note">Encuestas, predicciones, anuncios y más</p>
+        </div>
+        <button type="button" id="tl-close" class="icon-btn" aria-label="Cerrar">✕</button>
+      </header>
+      <nav id="tl-tabs" class="tl-tabs" aria-label="Herramientas"></nav>
+      <div class="st-body" id="tl-body"></div>
+    </div>
+  </dialog>
+
   <div id="toast" role="status"></div>
 
   <script src="app.js"></script>
   <script src="stream.js"></script>
+  <script src="tools.js"></script>
 </body>
 </html>
