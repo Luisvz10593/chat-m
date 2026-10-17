@@ -28,12 +28,20 @@
   <button id="jump" hidden>↓ Mensajes nuevos</button>
 
   <footer class="composer">
+    <!-- Selector de emojis y emotes -->
+    <div id="emote-panel" hidden>
+      <nav id="emote-tabs" class="tl-tabs"></nav>
+      <input id="emote-search" placeholder="🔍 Buscar…" autocomplete="off" autocapitalize="off">
+      <p id="emote-note" class="note">Elige un canal concreto en el selector para ver sus emotes. Con "Todos" usa emojis.</p>
+      <div id="emote-grid"></div>
+    </div>
     <div id="reply-bar" hidden>
       <span id="reply-text"></span>
       <button class="icon-btn small" id="reply-cancel" aria-label="Cancelar respuesta">✕</button>
     </div>
     <form id="send-form" autocomplete="off">
       <select id="target" class="target" aria-label="Plataforma donde escribir"></select>
+      <button type="button" id="emote-btn" class="icon-btn" aria-label="Emojis y emotes" title="Emojis y emotes">😀</button>
       <input id="input" maxlength="500" placeholder="Escribe en el chat…" enterkeyhint="send">
       <button type="submit" id="send-btn">Enviar</button>
     </form>
@@ -252,5 +260,6 @@
   <script src="app.js"></script>
   <script src="stream.js"></script>
   <script src="tools.js"></script>
+  <script src="emotes.js"></script>
 </body>
 </html>

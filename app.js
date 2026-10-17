@@ -92,6 +92,7 @@ const TWITCH_SCOPES = [
   'clips:edit',
   'moderator:manage:automod',  // mensajes retenidos por AutoMod
   'channel:manage:redemptions', // recompensas y canjes creados desde Chat M
+  'user:read:emotes',           // selector de emotes: todos los que puedes usar
 ].join(' ');
 const twitchMissingScopes = () => !!auth && TWITCH_SCOPES.split(' ').some((s) => !(auth.scopes || []).includes(s));
 
@@ -1161,6 +1162,8 @@ async function kickBroadcasterId(slug) {
 }
 
 async function kickSend(slug, content, replyId) {
+  // Emotes elegidos en el selector (":nombre:") → formato de Kick
+  content = await kickEmotify(slug, content);
   const body = { type: 'user', broadcaster_user_id: await kickBroadcasterId(slug), content };
   if (replyId) body.reply_to_message_id = replyId;
   await kickApi('POST', 'chat', body);
@@ -1220,6 +1223,7 @@ async function watchStarvios(name, gen) {
     // Empieza desde el inicio del directo actual (o la última limpieza del chat)
     const last = [stream.started_at, stream.chat_cleared_at].filter(Boolean).sort().pop() || new Date().toISOString();
     svStreams[name] = { id: stream.id, channelId: profile.id, last };
+    await loadStarviosEmotes(profile.id); // para mostrar ":codigo:" como imagen
     const recent = await svGet(`live_chat_messages?select=${SV_FIELDS}&stream_id=eq.${stream.id}`
       + `&created_at=gt.${encodeURIComponent(last)}&order=created_at.desc&limit=30`);
     if (gen !== svGen) return;
@@ -1284,7 +1288,7 @@ function handleStarviosMsg(d, channel) {
   }
 
   const badges = (d.badges || []).map((b) => BADGE_ALIASES[b] || b).filter((b) => BADGE_LABELS[b]);
-  const parts = [{ text: body }];
+  const parts = starviosParts(body);
   if (d.coins > 0) parts.unshift({ text: `⭐ ${d.coins} Starvies · ` });
 
   addMessage({
@@ -1586,6 +1590,7 @@ $('#send-form').addEventListener('submit', async (e) => {
     }
     input.value = '';
     clearReply();
+    closeEmotes();
   } catch (err) {
     toast(err.message, true);
   } finally {

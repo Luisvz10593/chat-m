@@ -49,6 +49,12 @@ Chat unificado de **Twitch + Kick + Starvios** para la tablet, pensado para usar
   Para las que creaste en su web, usa "Duplicar en Chat M" y desactiva la original.
   Ninguna plataforma permite dar o quitar puntos a mano.
 
+- **😀 Emojis y emotes:** botón junto al campo de texto. Emojis normales para todas
+  las plataformas, y los emotes del canal elegido: Twitch (todos los que puedes usar),
+  Kick (canal, globales y emojis de Kick) y Starvios (`:codigo:`). Los emotes de
+  Starvios también se ven como imagen en el chat.
+- **🎁 Canjear como espectador** (🧰 → 🏆 Canjes): solo Starvios lo permite; muestra
+  tus puntos y qué puedes canjear. Twitch y Kick no dejan canjear desde otras apps.
 - **🛡 AutoMod (Twitch):** los mensajes retenidos para revisión aparecen en el chat
   con botones **Permitir / Rechazar** (en tu canal y donde seas moderador).
 

@@ -687,6 +687,7 @@ const RENDER = {
 RENDER.rewards = function (body) {
   const sections = el('div', 'stack');
   sections.id = 'tl-rw';
+  body.append(redeemSection());
   body.append(
     el('p', 'note warn', 'Twitch y Kick solo dejan ver los canjes, devolver puntos y editar las recompensas creadas desde Chat M. '
       + 'Las que creaste en su web aparecen sin botones: usa "Duplicar en Chat M" y desactiva la original en su web. '
@@ -818,6 +819,102 @@ const RW = {
     canPause: false,
   },
 };
+
+/* ---------- 🎁 Canjear como espectador (solo Starvios) ----------
+ * Twitch y Kick no tienen en su API una forma de canjear puntos.
+ * Starvios sí: redeem_channel_reward, con tu saldo de puntos del canal.
+ */
+let rdChannel = null;
+
+function redeemSection() {
+  const sec = el('section', 'tl-live-card starvios rd-sec');
+  sec.append(el('h3', null, '🎁 Canjear como espectador'));
+  if (!svAuth) {
+    sec.append(el('p', 'note', 'Inicia sesión con Starvios en ⚙ para canjear recompensas. Twitch y Kick no permiten canjear puntos desde otras apps.'));
+    return sec;
+  }
+  sec.append(el('p', 'note', 'Solo Starvios lo permite; en Twitch y Kick hay que canjear desde su web o su app.'));
+  const chans = [{ name: 'tu canal', id: svAuth.userId }];
+  for (const name of channelsOf('starvios')) {
+    const s = svStreams[name];
+    if (s && s.channelId !== svAuth.userId) chans.push({ name, id: s.channelId });
+  }
+  if (!rdChannel || !chans.some((c) => c.id === rdChannel)) rdChannel = (chans[1] || chans[0]).id;
+  const pick = choiceRow(chans.map((c) => [c.id, c.name]), rdChannel);
+  const list = el('div', 'stack');
+  list.id = 'rd-list';
+  pick.addEventListener('click', () => { if (pick.value !== rdChannel) { rdChannel = pick.value; loadRedeem(); } });
+  sec.append(pick, list);
+  setTimeout(loadRedeem);
+  return sec;
+}
+
+async function loadRedeem() {
+  const list = $('#rd-list');
+  if (!list) return;
+  const ch = rdChannel;
+  list.replaceChildren(el('p', 'note', 'Cargando…'));
+  try {
+    const [status, rewards, state] = await Promise.all([
+      svAuthed('POST', 'rpc/channel_points_status', { _channel: ch }),
+      svGet(`channel_rewards?select=*&enabled=eq.true&channel_id=eq.${ch}&order=sort,cost`),
+      svAuthed('POST', 'rpc/channel_rewards_state', { _channel: ch }),
+    ]);
+    if (ch !== rdChannel || !document.body.contains(list)) return;
+    const st = status || {};
+    const byId = new Map((state || []).map((x) => [x.id, x]));
+    const points = Number(st.points || 0);
+    const rows = [el('p', 'rd-points', `Tus puntos: ${points.toLocaleString('es')}` + (st.is_live === false ? ' · el canal no está en directo' : ''))];
+    if (!rewards.length) rows.push(el('p', 'note', 'Este canal no tiene recompensas activas.'));
+    for (const r of rewards) {
+      const why = redeemBlock(r, byId.get(r.id), st, points);
+      const row = el('div', 'rw-row' + (why ? ' off' : ''));
+      const info = el('div', 'rw-info');
+      info.append(el('strong', null, r.title), el('span', 'rw-cost', ` · ${Number(r.cost).toLocaleString('es')} pts`));
+      if (r.description) info.append(el('div', 'note', r.description));
+      const b = rwButton(why || '🎁 Canjear', 'choice small' + (why ? '' : ' ok'), () => redeem(r));
+      b.disabled = !!why;
+      row.append(info, b);
+      rows.push(row);
+    }
+    list.replaceChildren(...rows);
+  } catch (e) {
+    if (document.body.contains(list)) list.replaceChildren(el('p', 'st-card-error', '⚠ ' + e.message));
+  }
+}
+
+// Mismas reglas que la web de Starvios para saber si se puede canjear ahora
+function redeemBlock(r, s, st, points) {
+  if (st.is_live === false) return 'Solo en directo';
+  if (r.subs_only && !st.is_subscriber) return 'Solo subs';
+  if (s && s.ready_at) {
+    const left = (Date.parse(s.ready_at) - Date.now()) / 1000;
+    if (left > 0) return `En ${fmtClock(left)}`;
+  }
+  if (r.max_per_stream != null && ((s && s.stream_used) || 0) >= r.max_per_stream) return 'Agotada';
+  if (r.max_per_user_per_stream != null && ((s && s.mine_stream) || 0) >= r.max_per_user_per_stream) return 'Límite del directo';
+  if (r.max_per_user_total != null && ((s && s.mine_total) || 0) >= r.max_per_user_total) return 'Límite alcanzado';
+  if (points < r.cost) return 'Faltan puntos';
+  return null;
+}
+
+async function redeem(r) {
+  let input = null;
+  if ((r.max_chars || 0) > 0) {
+    input = prompt(`${r.title}\n${r.description || 'Escribe tu mensaje'} (máx. ${r.max_chars})`, '');
+    if (input === null) return;
+    input = input.trim().slice(0, r.max_chars) || null;
+  } else if (!confirm(`¿Canjear "${r.title}" por ${Number(r.cost).toLocaleString('es')} puntos?`)) {
+    return;
+  }
+  try {
+    await svAuthed('POST', 'rpc/redeem_channel_reward', { _reward: r.id, _input: input });
+    toast(`¡Canjeado: ${r.title}!`);
+  } catch (e) {
+    toast(e.message, true);
+  }
+  loadRedeem();
+}
 
 // Dibuja (o actualiza) una sección por canal, sin tocar el formulario de "Nueva recompensa"
 async function loadRewards() {
