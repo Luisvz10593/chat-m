@@ -145,19 +145,38 @@ function emoteGroup(name, items) {
   return box;
 }
 
+/*
+ * Posición del cursor en el campo de texto. Se recuerda aparte porque en la
+ * tablet no volvemos a activar el campo al insertar (eso abría el teclado).
+ */
+const isTouch = matchMedia('(pointer: coarse)').matches;
+let caret = null; // { start, end } o null = al final
+const rememberCaret = () => {
+  const i = $('#input');
+  caret = { start: i.selectionStart ?? i.value.length, end: i.selectionEnd ?? i.value.length };
+};
+for (const ev of ['input', 'keyup', 'click', 'select', 'blur']) $('#input').addEventListener(ev, rememberCaret);
+// Al enviar o vaciar el campo, el cursor vuelve al final
+$('#send-form').addEventListener('submit', () => { caret = null; });
+
 // Inserta en la posición del cursor, con espacios alrededor si hace falta
 function insertText(text) {
   const input = $('#input');
-  const start = input.selectionStart ?? input.value.length;
-  const end = input.selectionEnd ?? input.value.length;
+  const len = input.value.length;
+  const start = Math.min(caret ? caret.start : len, len);
+  const end = Math.min(caret ? caret.end : len, len);
   const before = input.value.slice(0, start);
   const after = input.value.slice(end);
   const pre = before && !/\s$/.test(before) ? ' ' : '';
   const post = !after.startsWith(' ') ? ' ' : '';
   input.value = before + pre + text + post + after;
   const pos = (before + pre + text + post).length;
-  input.setSelectionRange(pos, pos);
-  input.focus({ preventScroll: true });
+  caret = { start: pos, end: pos };
+  // En tablet/celular no se activa el campo: así el teclado no se vuelve a abrir
+  if (!isTouch) {
+    input.focus({ preventScroll: true });
+    input.setSelectionRange(pos, pos);
+  }
 }
 
 /* ---------- Cargar emotes de cada plataforma ---------- */

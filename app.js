@@ -1578,6 +1578,8 @@ $('#send-form').addEventListener('submit', async (e) => {
   const input = $('#input');
   const text = input.value.trim();
   if (!text) return;
+  // Solo se vuelve al campo si ya estaba activo (si no, en la tablet se abriría el teclado)
+  const hadFocus = document.activeElement === input;
   const btn = $('#send-btn');
   btn.disabled = true;
   try {
@@ -1595,7 +1597,7 @@ $('#send-form').addEventListener('submit', async (e) => {
     toast(err.message, true);
   } finally {
     btn.disabled = false;
-    input.focus();
+    if (hadFocus) input.focus();
   }
 });
 
