@@ -90,6 +90,8 @@ const TWITCH_SCOPES = [
   'channel:read:ads',
   'channel:manage:ads',
   'clips:edit',
+  'moderator:manage:automod',  // mensajes retenidos por AutoMod
+  'channel:manage:redemptions', // recompensas y canjes creados desde Chat M
 ].join(' ');
 const twitchMissingScopes = () => !!auth && TWITCH_SCOPES.split(' ').some((s) => !(auth.scopes || []).includes(s));
 
@@ -790,7 +792,13 @@ function connectEventSub(reconnectUrl) {
 async function subscribeEventSub(ch) {
   const room = twitchRooms[ch];
   if (!esSession || !room || !auth) return;
-  const subs = [['channel.follow', '2', { broadcaster_user_id: room, moderator_user_id: auth.userId }, 'moderator:read:followers']];
+  const asMod = { broadcaster_user_id: room, moderator_user_id: auth.userId };
+  const subs = [
+    ['channel.follow', '2', asMod, 'moderator:read:followers'],
+    // Mensajes que AutoMod retiene para revisión, y cuando alguien los resuelve
+    ['automod.message.hold', '2', asMod, 'moderator:manage:automod'],
+    ['automod.message.update', '2', asMod, 'moderator:manage:automod'],
+  ];
   if (room === auth.userId) {
     subs.push(['channel.channel_points_custom_reward_redemption.add', '1', { broadcaster_user_id: room }, 'channel:read:redemptions']);
   }
@@ -809,10 +817,82 @@ function handleEventSub(type, ev) {
   const ch = ev.broadcaster_user_login;
   if (type === 'channel.follow') {
     addSystem('twitch', `❤️ ${ev.user_name} empezó a seguir el canal`, true, ch);
+  } else if (type === 'automod.message.hold') {
+    addAutomodCard(ev);
+  } else if (type === 'automod.message.update') {
+    resolveAutomodCard(ev.message_id, ev.status, ev.moderator_user_name);
   } else if (type === 'channel.channel_points_custom_reward_redemption.add') {
     const r = ev.reward || {};
     addSystem('twitch', `🏆 ${ev.user_name} canjeó "${r.title}" (${r.cost} puntos)${ev.user_input ? ' — ' + ev.user_input : ''}`, true, ch);
   }
+}
+
+/* ---------- AutoMod: mensajes retenidos para revisión ----------
+ * Twitch no los manda al chat normal; llegan por EventSub a los moderadores.
+ * Se muestran en el chat con botones para permitirlos o rechazarlos.
+ */
+const AUTOMOD_CATEGORIES = {
+  aggressive: 'agresivo', bullying: 'acoso', disability: 'discapacidad', sexuality: 'sexualidad',
+  misogyny: 'misoginia', race_ethnicity_or_religion: 'raza o religión', sex_based_terms: 'contenido sexual',
+  swearing: 'groserías',
+};
+
+function addAutomodCard(ev) {
+  const ch = ev.broadcaster_user_login;
+  const reason = ev.reason === 'blocked_term'
+    ? 'término bloqueado'
+    : ev.automod ? `${AUTOMOD_CATEGORIES[ev.automod.category] || ev.automod.category}, nivel ${ev.automod.level}` : 'AutoMod';
+  const text = (ev.message && ev.message.text) || ev.message || '';
+
+  const card = document.createElement('div');
+  card.className = 'msg twitch automod';
+  card.dataset.src = srcKey('twitch', ch);
+  card.dataset.amid = ev.message_id;
+  const time = document.createElement('span');
+  time.className = 'time';
+  time.textContent = fmtTime(new Date());
+  const content = document.createElement('div');
+  content.className = 'content';
+  const head = document.createElement('div');
+  head.className = 'am-head';
+  head.textContent = `🛡 AutoMod retuvo un mensaje de ${ev.user_name} (${reason})`;
+  const body = document.createElement('div');
+  body.className = 'am-text';
+  body.textContent = text;
+  const actions = document.createElement('div');
+  actions.className = 'am-actions';
+  for (const [action, label, cls] of [['ALLOW', '✓ Permitir', 'am-allow'], ['DENY', '✕ Rechazar', 'am-deny']]) {
+    const b = document.createElement('button');
+    b.className = cls;
+    b.textContent = label;
+    b.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      for (const x of actions.querySelectorAll('button')) x.disabled = true;
+      try {
+        await helix('POST', 'moderation/automod/message', null, { user_id: auth.userId, msg_id: ev.message_id, action });
+        resolveAutomodCard(ev.message_id, action === 'ALLOW' ? 'approved' : 'denied', auth.login);
+      } catch (err) {
+        toast(err.message, true);
+        for (const x of actions.querySelectorAll('button')) x.disabled = false;
+      }
+    });
+    actions.append(b);
+  }
+  content.append(chanTag(ch), head, body, actions);
+  card.append(time, content);
+  pushEl(card, Date.now());
+  toast(`🛡 Mensaje retenido por AutoMod en ${ch}`);
+}
+
+function resolveAutomodCard(messageId, status, by) {
+  const card = feed.querySelector(`.msg.automod[data-amid="${CSS.escape(messageId || '')}"]`);
+  if (!card || card.classList.contains('resolved')) return;
+  card.classList.add('resolved', status === 'approved' ? 'approved' : 'denied');
+  const actions = card.querySelector('.am-actions');
+  const label = { approved: '✓ Permitido', denied: '✕ Rechazado', expired: '⌛ Expiró sin revisar' }[status] || status;
+  actions.replaceChildren(Object.assign(document.createElement('span'), {
+    className: 'am-status', textContent: label + (by && status !== 'expired' ? ` por ${by}` : ''),
+  }));
 }
 
 /* =========================================================
@@ -950,7 +1030,7 @@ function kickParts(text) {
    El Client Secret lo escribe el usuario en Ajustes y solo
    se guarda en este dispositivo (localStorage).
    ========================================================= */
-const KICK_SCOPES = 'user:read channel:read channel:write chat:write moderation:ban moderation:chat_message:manage ads:read ads:write';
+const KICK_SCOPES = 'user:read channel:read channel:write chat:write moderation:ban moderation:chat_message:manage ads:read ads:write channel:rewards:read channel:rewards:write';
 const KICK_API = 'https://api.kick.com/public/v1/';
 let kickAuth = store.get('kickAuth', null); // { access, refresh, expiresAt, userId, name }
 const kickBroadcasters = {};                // canal → broadcaster_user_id
@@ -1541,7 +1621,7 @@ function updateAuthUi() {
   const outdated = {
     twitch: twitchMissingScopes(),
     kick: !!kickAuth && (kickAuth.scope === undefined
-      || (!!kickAuth.scope && ['channel:write', 'ads:write'].some((s) => !kickAuth.scope.includes(s)))),
+      || (!!kickAuth.scope && ['channel:write', 'ads:write', 'channel:rewards:write'].some((s) => !kickAuth.scope.includes(s)))),
     starvios: false,
   };
   for (const [p, who] of rows) {

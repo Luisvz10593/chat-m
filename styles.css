@@ -125,6 +125,25 @@ body.hide-time .msg .time { display: none; }
 }
 body.show-channel .msg .chan { display: inline; }
 
+/* AutoMod: mensaje retenido para revisión */
+.msg.automod {
+  margin: 4px 8px; border-radius: 12px; border: 2px solid #ff9f1c; border-left-width: 6px;
+  background: rgba(255, 159, 28, .1);
+}
+.msg.automod.resolved { border-color: var(--line); background: transparent; opacity: .7; }
+.am-head { font-size: .75em; font-weight: 700; color: #ffb454; }
+.am-text { margin: 4px 0 8px; overflow-wrap: anywhere; }
+.am-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.am-actions button {
+  min-height: 44px; padding: 0 18px; border-radius: 10px; border: 0;
+  font-size: 15px; font-weight: 700;
+}
+.am-allow { background: #3ddc84; color: #000; }
+.am-deny { background: var(--danger); color: #fff; }
+.am-status { font-size: .75em; font-weight: 700; color: var(--muted); }
+.msg.automod.approved .am-status { color: #3ddc84; }
+.msg.automod.denied .am-status { color: var(--danger); }
+
 /* Chat compartido de Twitch: mensaje que viene del chat de otro canal */
 .msg .shared {
   display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 6px;
@@ -425,6 +444,28 @@ section[hidden], #st-main[hidden], #st-review[hidden] { display: none; }
 .opt-row input { flex: 1; }
 .tl-link { color: #bf94ff; font-weight: 700; }
 .tag.on { border-color: #3ddc84; color: #3ddc84; }
+
+/* Canjes y recompensas */
+.rw-row {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 10px; border-radius: 10px; background: var(--bg);
+}
+.rw-row.off { opacity: .55; }
+.rw-info { flex: 1; min-width: 180px; }
+.rw-info strong { padding-left: 6px; }
+.rw-cost { color: #ffd54f; font-weight: 700; }
+.rw-input { margin-top: 4px; padding: 6px 8px; border-radius: 8px; background: var(--panel-2); overflow-wrap: anywhere; }
+.rw-acts { display: flex; flex-wrap: wrap; gap: 6px; }
+.choice.ok { background: #3ddc84; border-color: #3ddc84; color: #000; }
+.choice.danger { border-color: var(--danger); color: var(--danger); }
+.rw-new { border-top: 1px solid var(--line); padding-top: 8px; display: flex; flex-direction: column; gap: 10px; }
+.rw-new[open] { display: flex; }
+.rw-new summary { cursor: pointer; font-weight: 700; padding: 6px 0; }
+.rw-new input[type="number"] {
+  min-height: 46px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit;
+}
+.rw-new .check { display: flex; align-items: center; gap: 10px; }
+.rw-new .check input { width: 22px; height: 22px; }
 
 /* Tarjetas de estado en vivo (encuestas, predicciones, publicidad, modos) */
 .tl-live-card {

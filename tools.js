@@ -18,6 +18,7 @@ const TOOLS = [
   { id: 'chatmodes', icon: '💬', name: 'Modos del chat' },
   { id: 'raid', icon: '🚀', name: 'Raid y shoutout' },
   { id: 'clip', icon: '🎬', name: 'Clip' },
+  { id: 'rewards', icon: '🏆', name: 'Canjes' },
 ];
 
 // Qué permite cada plataforma. null = se puede; texto = por qué no.
@@ -34,6 +35,7 @@ const SUPPORT = {
   chatmodes: (t) => (t.p === 'kick' ? NO('kick', 'cambiar los modos del chat') : null),
   raid: (t) => (t.p === 'kick' ? NO('kick', 'raids ni shoutouts') : null),
   clip: (t) => (t.p === 'twitch' ? null : NO(t.p, 'crear clips')),
+  rewards: (t) => (t.own ? null : 'Las recompensas solo se gestionan en tu propio canal'),
 };
 // Dentro de "Raid y shoutout" cada acción tiene sus propias reglas
 const RAID_OK = (t) => (t.own && t.p !== 'kick' ? null : t.p === 'kick' ? NO('kick', 'raids') : 'Solo puedes hacer raid desde tu canal');
@@ -165,6 +167,7 @@ function targetPicker(tool) {
       if (box2.checked) tlSel[tool].add(t.id); else tlSel[tool].delete(t.id);
       if (LIVE[tool]) startLive();
       if (tool === 'chatmodes') loadModes();
+      if (tool === 'rewards') loadRewards();
     });
     label.append(box2, ' ' + tName(t));
     if (why) { label.title = why; reasons.push(`${tName(t)}: ${why}.`); }
@@ -673,6 +676,285 @@ const RENDER = {
     );
   },
 };
+
+/* =========================================================
+   🏆 Canjes: recompensas y canjes de puntos de tu canal
+   Twitch y Kick solo dejan gestionar (canjes, devolver puntos,
+   editar) las recompensas creadas desde la misma app, es decir,
+   desde Chat M. Starvios permite gestionar todas las de tu canal.
+   Ninguna permite dar o quitar puntos a mano.
+   ========================================================= */
+RENDER.rewards = function (body) {
+  const sections = el('div', 'stack');
+  sections.id = 'tl-rw';
+  body.append(
+    el('p', 'note warn', 'Twitch y Kick solo dejan ver los canjes, devolver puntos y editar las recompensas creadas desde Chat M. '
+      + 'Las que creaste en su web aparecen sin botones: usa "Duplicar en Chat M" y desactiva la original en su web. '
+      + 'Ninguna plataforma permite dar o quitar puntos a mano; solo devolver los de un canje.'),
+    sections, results(),
+  );
+  loadRewards();
+  tlTimer = setInterval(loadRewards, 10000); // los canjes pendientes se actualizan solos
+};
+
+const RW = {
+  twitch: {
+    async list(t) {
+      const room = await twRoom(t);
+      const [all, mine] = await Promise.all([
+        helix('GET', 'channel_points/custom_rewards', { broadcaster_id: room }),
+        helix('GET', 'channel_points/custom_rewards', { broadcaster_id: room, only_manageable_rewards: true }),
+      ]);
+      const own = new Set((mine.data || []).map((r) => r.id));
+      const rewards = (all.data || []).map((r) => ({
+        id: r.id, title: r.title, cost: r.cost, enabled: r.is_enabled, paused: r.is_paused,
+        input: r.is_user_input_required, prompt: r.prompt, color: r.background_color, manage: own.has(r.id),
+      }));
+      // Canjes pendientes de las recompensas que Chat M puede gestionar
+      const pending = [];
+      await Promise.all(rewards.filter((r) => r.manage).map(async (r) => {
+        const j = await helix('GET', 'channel_points/custom_rewards/redemptions', { broadcaster_id: room, reward_id: r.id, status: 'UNFULFILLED', first: 50 });
+        for (const x of j.data || []) pending.push({ id: x.id, reward: r, user: x.user_name, input: x.user_input, at: x.redeemed_at });
+      }));
+      return { rewards, pending };
+    },
+    setRedemption: async (t, x, ok) => helix('PATCH', 'channel_points/custom_rewards/redemptions',
+      { id: x.id, broadcaster_id: await twRoom(t), reward_id: x.reward.id }, { status: ok ? 'FULFILLED' : 'CANCELED' }),
+    update: async (t, r, changes) => helix('PATCH', 'channel_points/custom_rewards', { broadcaster_id: await twRoom(t), id: r.id }, {
+      ...(changes.enabled !== undefined ? { is_enabled: changes.enabled } : {}),
+      ...(changes.paused !== undefined ? { is_paused: changes.paused } : {}),
+      ...(changes.cost !== undefined ? { cost: changes.cost } : {}),
+    }),
+    remove: async (t, r) => helix('DELETE', 'channel_points/custom_rewards', { broadcaster_id: await twRoom(t), id: r.id }),
+    create: async (t, f) => helix('POST', 'channel_points/custom_rewards', { broadcaster_id: await twRoom(t) }, {
+      title: f.title.slice(0, 45), cost: f.cost, prompt: f.prompt || undefined,
+      is_user_input_required: f.input, ...(f.color ? { background_color: f.color } : {}),
+    }),
+    canPause: true,
+  },
+  kick: {
+    async list() {
+      const [rw, rd] = await Promise.all([kickApi('GET', 'channels/rewards'), kickApi('GET', 'channels/rewards/redemptions?status=pending')]);
+      const manageIds = new Set();
+      const pending = [];
+      for (const g of rd.data || []) {
+        if (g.reward && g.reward.can_manage) manageIds.add(g.reward.id);
+        for (const x of g.redemptions || []) {
+          pending.push({ id: x.id, reward: { id: g.reward.id, title: g.reward.title, manage: !!g.reward.can_manage }, user: '#' + x.redeemer.user_id, input: x.user_input, at: x.redeemed_at });
+        }
+      }
+      // Kick no dice en la lista de recompensas cuáles creó esta app: lo recordamos al crearlas
+      const created = new Set(store.get('kickRewardsMine', []));
+      const rewards = (rw.data || []).map((r) => ({
+        id: r.id, title: r.title, cost: r.cost, enabled: r.is_enabled, paused: r.is_paused,
+        input: r.is_user_input_required, prompt: r.description, color: r.background_color,
+        manage: created.has(r.id) || manageIds.has(r.id),
+      }));
+      for (const x of pending) x.reward.manage = x.reward.manage || created.has(x.reward.id);
+      return { rewards, pending: pending.filter((x) => x.reward.manage) };
+    },
+    async setRedemption(t, x, ok) {
+      const j = await kickApi('POST', `channels/rewards/redemptions/${ok ? 'accept' : 'reject'}`, { ids: [x.id] });
+      const fail = j.data && j.data[0];
+      if (fail) throw new Error(`Kick lo rechazó (${fail.reason})`);
+    },
+    update: (t, r, changes) => kickApi('PATCH', 'channels/rewards/' + encodeURIComponent(r.id), {
+      ...(changes.enabled !== undefined ? { is_enabled: changes.enabled } : {}),
+      ...(changes.paused !== undefined ? { is_paused: changes.paused } : {}),
+      ...(changes.cost !== undefined ? { cost: changes.cost } : {}),
+    }),
+    remove: (t, r) => kickApi('DELETE', 'channels/rewards/' + encodeURIComponent(r.id)),
+    async create(t, f) {
+      const j = await kickApi('POST', 'channels/rewards', {
+        title: f.title.slice(0, 50), cost: f.cost, description: f.prompt || undefined,
+        is_user_input_required: f.input, ...(f.color ? { background_color: f.color } : {}),
+      });
+      if (j.data && j.data.id) store.set('kickRewardsMine', [...store.get('kickRewardsMine', []), j.data.id]);
+    },
+    canPause: true,
+  },
+  starvios: {
+    async list() {
+      const me = svAuth.userId;
+      const [rewards, reds] = await Promise.all([
+        svGet(`channel_rewards?select=*&channel_id=eq.${me}&order=sort,cost`),
+        svGet(`channel_reward_redemptions?select=id,reward_title,cost,input,status,created_at,user_id&channel_id=eq.${me}&order=created_at.desc&limit=30`),
+      ]);
+      const ids = [...new Set(reds.map((x) => x.user_id))];
+      const names = {};
+      if (ids.length) {
+        for (const p of await svGet(`profiles?select=id,username,display_name&id=in.(${ids.join(',')})`)) names[p.id] = p.display_name || p.username;
+      }
+      return {
+        rewards: rewards.map((r) => ({ id: r.id, title: r.title, cost: r.cost, enabled: r.enabled, input: (r.max_chars || 0) > 0, prompt: r.description, kind: r.kind, manage: true })),
+        // Starvios no tiene cola de "pendientes": se listan los últimos y se pueden devolver
+        pending: reds.filter((x) => !/refund/i.test(x.status || '')).map((x) => ({
+          id: x.id, reward: { title: x.reward_title, manage: true }, user: names[x.user_id] || 'alguien', input: x.input, at: x.created_at, status: x.status,
+        })),
+      };
+    },
+    async setRedemption(t, x, ok) {
+      if (ok) return; // en Starvios el canje ya se aplicó; solo existe "devolver"
+      await svAuthed('POST', 'rpc/refund_channel_redemption', { _id: x.id });
+    },
+    async update(t, r, changes) {
+      const body = {};
+      if (changes.enabled !== undefined) body.enabled = changes.enabled;
+      if (changes.cost !== undefined) body.cost = changes.cost;
+      const rows = await svAuthed('PATCH', `channel_rewards?id=eq.${encodeURIComponent(r.id)}&select=id`, body, { Prefer: 'return=representation' });
+      if (!rows || !rows.length) throw new Error('Starvios no aceptó el cambio');
+    },
+    async remove(t, r) {
+      const rows = await svAuthed('DELETE', `channel_rewards?id=eq.${encodeURIComponent(r.id)}&select=id`, null, { Prefer: 'return=representation' });
+      if (!rows || !rows.length) throw new Error('Starvios no borró la recompensa');
+    },
+    async create(t, f) {
+      const rows = await svAuthed('POST', 'channel_rewards?select=id', {
+        channel_id: svAuth.userId, title: f.title.slice(0, 50), kind: 'custom', description: f.prompt || null,
+        cost: f.cost, enabled: true, max_chars: f.input ? 200 : 0, ...(f.color ? { color: f.color } : {}),
+      }, { Prefer: 'return=representation' });
+      if (!rows || !rows.length) throw new Error('Starvios no creó la recompensa');
+    },
+    canPause: false,
+  },
+};
+
+// Dibuja (o actualiza) una sección por canal, sin tocar el formulario de "Nueva recompensa"
+async function loadRewards() {
+  const box = $('#tl-rw');
+  if (!box) return;
+  const targets = chosen('rewards');
+  if (!targets.length) { box.replaceChildren(el('p', 'note', 'Marca tu canal arriba para ver sus recompensas.')); return; }
+  for (const t of targets) {
+    let sec = box.querySelector(`.rw-sec[data-id="${CSS.escape(t.id)}"]`);
+    if (!sec) {
+      sec = el('section', `tl-live-card ${t.p} rw-sec`);
+      sec.dataset.id = t.id;
+      const head = el('div', 'st-card-head');
+      head.append(el('span', `badge-platform ${t.p}`, PLATFORM_NAMES[t.p]), el('span', 'st-card-name', t.ch));
+      const data = el('div', 'stack rw-data');
+      data.append(el('p', 'note', 'Cargando…'));
+      sec.append(head, data, newRewardForm(t));
+      box.append(sec);
+    }
+    const data = sec.querySelector('.rw-data');
+    try {
+      const { rewards, pending } = await RW[t.p].list(t);
+      if (!document.body.contains(data)) return;
+      data.replaceChildren(pendingList(t, pending), rewardList(t, rewards));
+    } catch (e) {
+      if (document.body.contains(data)) data.replaceChildren(el('p', 'st-card-error', '⚠ ' + e.message));
+    }
+  }
+  for (const s of box.querySelectorAll('.rw-sec')) if (!targets.some((t) => t.id === s.dataset.id)) s.remove();
+  for (const n of box.querySelectorAll(':scope > .note')) n.remove();
+}
+
+function pendingList(t, pending) {
+  const wrap = el('div', 'stack');
+  wrap.append(el('h4', null, t.p === 'starvios' ? `Canjes recientes (${pending.length})` : `Canjes pendientes (${pending.length})`));
+  if (!pending.length) { wrap.append(el('p', 'note', 'No hay canjes por revisar.')); return wrap; }
+  for (const x of pending) {
+    const row = el('div', 'rw-row');
+    const info = el('div', 'rw-info');
+    info.append(el('strong', null, x.user), el('span', null, ` canjeó "${x.reward.title}"`));
+    if (x.input) info.append(el('div', 'rw-input', '💬 ' + x.input));
+    info.append(el('div', 'note', fmtTime(new Date(x.at)) + (x.status ? ` · ${x.status}` : '')));
+    const acts = el('div', 'rw-acts');
+    if (t.p !== 'starvios') acts.append(rwButton('✓ Completar', 'choice small ok', () => redemption(t, x, true)));
+    acts.append(rwButton('↩ Devolver puntos', 'choice small', () => {
+      if (confirm(`¿Devolver los puntos a ${x.user} por "${x.reward.title}"?`)) redemption(t, x, false);
+    }));
+    row.append(info, acts);
+    wrap.append(row);
+  }
+  return wrap;
+}
+
+function rewardList(t, rewards) {
+  const wrap = el('div', 'stack');
+  wrap.append(el('h4', null, `Recompensas (${rewards.length})`));
+  if (!rewards.length) { wrap.append(el('p', 'note', 'Este canal no tiene recompensas.')); return wrap; }
+  const api = RW[t.p];
+  for (const r of rewards) {
+    const row = el('div', 'rw-row' + (r.enabled ? '' : ' off'));
+    const info = el('div', 'rw-info');
+    const title = el('strong', null, r.title);
+    if (r.color) title.style.borderLeft = `4px solid ${r.color}`;
+    info.append(title, el('span', 'rw-cost', ` · ${Number(r.cost).toLocaleString('es')} pts`));
+    const tags = el('div', 'st-card-tags');
+    tags.append(el('span', 'tag' + (r.enabled ? ' on' : ''), r.enabled ? 'Activa' : 'Desactivada'));
+    if (r.paused) tags.append(el('span', 'tag', '⏸ Pausada'));
+    if (r.input) tags.append(el('span', 'tag', '💬 Pide texto'));
+    if (r.manage && t.p !== 'starvios') tags.append(el('span', 'tag on', 'Chat M'));
+    info.append(tags);
+    const acts = el('div', 'rw-acts');
+    if (r.manage) {
+      acts.append(rwButton(r.enabled ? 'Desactivar' : 'Activar', 'choice small', () => rewardChange(t, r, { enabled: !r.enabled })));
+      if (api.canPause) acts.append(rwButton(r.paused ? '▶ Reanudar' : '⏸ Pausar', 'choice small', () => rewardChange(t, r, { paused: !r.paused })));
+      acts.append(rwButton('✎ Costo', 'choice small', () => {
+        const v = Math.floor(Number(prompt(`Nuevo costo para "${r.title}"`, r.cost)));
+        if (v >= 1) rewardChange(t, r, { cost: v });
+      }));
+      acts.append(rwButton('🗑', 'choice small danger', () => {
+        if (confirm(`¿Borrar la recompensa "${r.title}"?`)) rwDo(t, 'Recompensa borrada', () => api.remove(t, r));
+      }));
+    } else {
+      acts.append(rwButton('⧉ Duplicar en Chat M', 'choice small', () => {
+        const title = prompt('Nombre de la copia (debe ser distinto al original):', r.title + ' ★');
+        if (title) rwDo(t, 'Copia creada: desactiva la original en la web de ' + PLATFORM_NAMES[t.p],
+          () => api.create(t, { title, cost: r.cost, prompt: r.prompt, input: r.input, color: r.color }));
+      }));
+    }
+    row.append(info, acts);
+    wrap.append(row);
+  }
+  return wrap;
+}
+
+function newRewardForm(t) {
+  const d = el('details', 'rw-new');
+  d.append(el('summary', null, '＋ Nueva recompensa'));
+  const title = textInput(45, 'Ej.: Elige la próxima rutina');
+  const cost = el('input');
+  cost.type = 'number';
+  cost.min = '1';
+  cost.value = '500';
+  cost.inputMode = 'numeric';
+  const desc = textInput(200, 'Texto que verá quien la canjee (opcional)');
+  const inputLbl = el('label', 'check');
+  const input = el('input');
+  input.type = 'checkbox';
+  inputLbl.append(input, ' Pedir un texto al canjear');
+  const go = bigButton('Crear recompensa', async () => {
+    const f = { title: title.value.trim(), cost: Math.floor(Number(cost.value)), prompt: desc.value.trim(), input: input.checked };
+    if (!f.title || !(f.cost >= 1)) { toast('Escribe el nombre y un costo de al menos 1.', true); return; }
+    if (await rwDo(t, 'Recompensa creada', () => RW[t.p].create(t, f))) { title.value = ''; desc.value = ''; d.open = false; }
+  });
+  d.append(field('Nombre', title, true), field('Costo en puntos', cost), field('Descripción', desc, true), inputLbl, go);
+  return d;
+}
+
+function rwButton(text, cls, onClick) {
+  const b = el('button', cls, text);
+  b.type = 'button';
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+async function rwDo(t, okText, fn) {
+  try {
+    await fn();
+    toast(`${okText} (${tName(t)}).`);
+    loadRewards();
+    return true;
+  } catch (e) {
+    toast(`${tName(t)}: ${e.message}`, true);
+    return false;
+  }
+}
+const redemption = (t, x, ok) => rwDo(t, ok ? 'Canje completado' : 'Puntos devueltos', () => RW[t.p].setRedemption(t, x, ok));
+const rewardChange = (t, r, changes) => rwDo(t, 'Recompensa actualizada', () => RW[t.p].update(t, r, changes));
 
 function liveSection(title) {
   const s = el('section', 'stack');

@@ -42,6 +42,15 @@ Chat unificado de **Twitch + Kick + Starvios** para la tablet, pensado para usar
   | 📢 Shoutout | Donde eres mod | ✗ | ✗ |
   | 🎬 Clips | ✓ | ✗ | ✗ |
   | 📌 Fijar mensaje (menú del mensaje) | Donde eres mod | ✗ | ✓ |
+  | 🏆 Canjes: pendientes, completar, devolver puntos | Recompensas creadas en Chat M | Recompensas creadas en Chat M | ✓ |
+  | 🏆 Recompensas: crear, activar, pausar, costo, borrar | Creadas en Chat M | Creadas en Chat M | ✓ |
+
+  Twitch y Kick solo dejan gestionar las recompensas creadas desde la misma app.
+  Para las que creaste en su web, usa "Duplicar en Chat M" y desactiva la original.
+  Ninguna plataforma permite dar o quitar puntos a mano.
+
+- **🛡 AutoMod (Twitch):** los mensajes retenidos para revisión aparecen en el chat
+  con botones **Permitir / Rechazar** (en tu canal y donde seas moderador).
 
 - Mantiene la pantalla de la tablet encendida.
 
@@ -88,7 +97,8 @@ Para leer el chat no hace falta iniciar sesión.
    (`https://luisvz10593.github.io/chat-m/`, y `http://localhost:8080/` si pruebas en la PC).
 3. Activa los permisos: **Read user info**, **Read channel info**, **Write channel info**
    (para 🎬 Directo), **Write to chat**, **Moderation: ban users**,
-   **Moderation: manage chat messages**, **Read ads** y **Write ads** (para 🧰 Publicidad).
+   **Moderation: manage chat messages**, **Read ads** y **Write ads** (para 🧰 Publicidad),
+   **Read channel rewards** y **Write channel rewards** (para 🏆 Canjes).
 4. Copia el **Client ID** y el **Client Secret** y pégalos **en la tablet**, en
    ⚙ Ajustes → Cuenta de Kick. Toca **Iniciar sesión**.
 
