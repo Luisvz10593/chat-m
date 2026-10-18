@@ -109,6 +109,7 @@ function openStream() {
 
   setTab('quick');
   setView('main');
+  renderTwitchCcl();
   renderCards();
   renderForm();
   renderFavs();
@@ -740,6 +741,50 @@ async function applyPending() {
   $('#st-review-note').textContent = fail ? 'Revisa el motivo en cada canal marcado con ✕.' : 'Todo quedó actualizado.';
   toast(fail ? `Aplicado en ${ok}, falló en ${fail}.` : 'Directo actualizado.', !!fail);
   setView('done');
+}
+
+/* ---------- Twitch: clasificación de contenido y contenido patrocinado ----------
+ * Se aplican al momento (no pasan por la revisión). Algunas etiquetas las pone
+ * Twitch solo según la categoría y no se pueden quitar.
+ */
+async function renderTwitchCcl() {
+  const box = $('#st-extra');
+  box.replaceChildren();
+  if (!auth) return;
+  const card = el('div', 'card');
+  card.append(el('h3', null, '🏷 Twitch: clasificación del contenido'), el('p', 'sub', 'Avisos para tu audiencia. Se aplican al momento en tu canal de Twitch.'));
+  box.append(card);
+  try {
+    const [labels, info] = await Promise.all([
+      helix('GET', 'content_classification_labels', { locale: 'es-ES' }),
+      helix('GET', 'channels', { broadcaster_id: auth.userId }),
+    ]);
+    const ch = (info.data && info.data[0]) || {};
+    const active = new Set(ch.content_classification_labels || []);
+    const grid = el('div', 'ccl-grid');
+    const toggle = (label, checked, onChange, desc) => {
+      const l = el('label', 'toggle');
+      const i = el('input');
+      i.type = 'checkbox';
+      i.checked = checked;
+      i.addEventListener('change', async () => {
+        i.disabled = true;
+        try { await onChange(i.checked); toast('Actualizado en Twitch'); } catch (e) { i.checked = !i.checked; toast(e.message, true); }
+        i.disabled = false;
+      });
+      l.append(i, label);
+      if (desc) l.title = desc;
+      return l;
+    };
+    for (const lab of labels.data || []) {
+      grid.append(toggle(lab.name, active.has(lab.id), (on) => helix('PATCH', 'channels', { broadcaster_id: auth.userId },
+        { content_classification_labels: [{ id: lab.id, is_enabled: on }] }), lab.description));
+    }
+    card.append(grid, toggle('💼 Contenido patrocinado (publicidad pagada)', !!ch.is_branded_content,
+      (on) => helix('PATCH', 'channels', { broadcaster_id: auth.userId }, { is_branded_content: on })));
+  } catch (e) {
+    card.append(el('p', 'st-card-error', '⚠ ' + e.message));
+  }
 }
 
 $('#btn-stream').addEventListener('click', openStream);

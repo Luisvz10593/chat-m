@@ -1,11 +1,32 @@
 # Chat M
 
-Chat unificado de **Twitch + Kick + Starvios** para la tablet, pensado para usarlo mientras transmites.
+Centro de mando para tus directos en **Twitch + Kick + Starvios**, pensado para la tablet:
+chat unificado, moderación, estadísticas en vivo y herramientas del canal.
 
-## Qué hace
+## Secciones
+
+El menú está a la izquierda (abajo en pantallas angostas). En pantallas anchas el
+chat queda siempre visible y la sección se abre a su lado.
+
+- **💬 Chat:** todos tus canales en una lista, eventos, AutoMod, chat compartido,
+  mensaje fijado, susurros, 😀 emojis/emotes, enviar a uno o a todos.
+- **🛡 Moderar:** solicitudes de desbaneo, sospechosos, baneados, quién está en el chat,
+  mods y VIPs, términos bloqueados, niveles de AutoMod, ajustes del chat de Starvios,
+  registro de acciones, modo escudo y **tarjeta de usuario** (👤 desde cualquier mensaje).
+- **📊 Panel:** resumen en vivo de todos los canales y, por canal, seguidores, subs,
+  metas, Hype Train, rankings (bits, KICKs, subs regaladas, Starvies), campaña
+  benéfica, actividad y estadísticas del mes.
+- **🧰 Herramientas:** encuestas, predicciones, anuncios, marcadores, publicidad,
+  modos del chat, raid, shoutout, clips, canjes y recompensas (tabla abajo).
+- **🎬 Directo:** título, categoría y tags (y clasificación del contenido de Twitch).
+- **🎞 Contenido:** clips, VODs, marcadores, calendario, canales que sigues en vivo;
+  en Starvios también comandos, emotes, mensajes privados, notificaciones, alertas
+  de OBS y ajustes del directo.
+
+## Detalle
 
 - Lee los chats de Twitch, Kick y Starvios en una sola lista
-  (borde morado = Twitch, verde = Kick, amarillo = Starvios).
+  (borde morado = Twitch, verde = Kick, rosa = Starvios).
 - Emotes (Twitch y Kick), insignias (STREAMER / MOD / VIP / SUB), avisos de subs, raids y donaciones de Starvies.
 - Resalta los mensajes que te mencionan.
 - **Varios canales por plataforma:** en ⚙ escríbelos separados por coma
@@ -104,7 +125,8 @@ Para leer el chat no hace falta iniciar sesión.
 3. Activa los permisos: **Read user info**, **Read channel info**, **Write channel info**
    (para 🎬 Directo), **Write to chat**, **Moderation: ban users**,
    **Moderation: manage chat messages**, **Read ads** y **Write ads** (para 🧰 Publicidad),
-   **Read channel rewards** y **Write channel rewards** (para 🏆 Canjes).
+   **Read channel rewards** y **Write channel rewards** (para 🏆 Canjes) y
+   **Read KICKs** (para el ranking de KICKs del 📊 Panel).
 4. Copia el **Client ID** y el **Client Secret** y pégalos **en la tablet**, en
    ⚙ Ajustes → Cuenta de Kick. Toca **Iniciar sesión**.
 

@@ -355,6 +355,22 @@ function liveCard(t, s, error) {
     const val = el('span', 'bar-val', `${pct}% · ${r.detail || r.value}`);
     bar.append(label, val);
     row.append(bar);
+    // Como espectador (Starvios): votar en la encuesta o apostar en la predicción
+    if (s.vote) {
+      const b = el('button', 'choice small', '🗳 Votar');
+      b.type = 'button';
+      b.addEventListener('click', () => liveAction(t, () => s.vote(i), 'Voto enviado'));
+      row.append(b);
+    }
+    if (s.bet) {
+      const b = el('button', 'choice small', '💰 Apostar');
+      b.type = 'button';
+      b.addEventListener('click', () => {
+        const pts = Math.floor(Number(prompt(`¿Cuántos puntos apuestas a "${r.label}"?`, '100')));
+        if (pts >= 1) liveAction(t, () => s.bet(i, pts), 'Apuesta enviada');
+      });
+      row.append(b);
+    }
     if (s.pick) {
       const b = el('button', 'choice small', '🏆 Ganó');
       b.type = 'button';
@@ -417,6 +433,7 @@ const LIVE = {
         title: p.title,
         ends: Date.parse(p.ends_at),
         rows: (p.options || []).map((o, i) => ({ label: o, value: Number(counts[i] || 0), detail: `${Number(counts[i] || 0)} votos` })),
+        vote: (i) => svAuthed('POST', 'rpc/vote_chat_poll', { _poll: p.id, _option: i }),
         actions: [
           ['⏹ Terminar', () => svAuthed('POST', 'rpc/end_chat_poll', { _poll: p.id, _cancel: false })],
           ['✕ Cancelar', () => svAuthed('POST', 'rpc/end_chat_poll', { _poll: p.id, _cancel: true }), '¿Cancelar la encuesta?'],
@@ -457,6 +474,7 @@ const LIVE = {
         statusText: locked ? '🔒 Bloqueada: elige el resultado ganador' : null,
         rows: (p.outcomes || []).map((o, i) => ({ label: o, value: Number(pts[i] || 0), detail: `${Number(pts[i] || 0).toLocaleString('es')} pts · ${Number(users[i] || 0)} personas` })),
         pick: (i) => manage({ _action: 'resolve', _winner: i }),
+        bet: locked ? null : (i, pts) => svAuthed('POST', 'rpc/bet_chat_prediction', { _prediction: p.id, _outcome: i, _points: pts }),
         actions: [
           ...(locked ? [] : [['🔒 Bloquear', () => manage({ _action: 'lock' })]]),
           ['✕ Cancelar y devolver puntos', () => manage({ _action: 'cancel' }), '¿Cancelar la predicción y devolver los puntos?'],

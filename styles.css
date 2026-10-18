@@ -742,3 +742,25 @@ section[hidden], #st-main[hidden], #st-review[hidden] { display: none; }
 .swatch { width: 34px; height: 34px; border-radius: 50%; border: 3px solid transparent; }
 .swatch.on { border-color: #fff; }
 #color-row input[type="color"] { width: 44px; height: 34px; border: 0; background: none; padding: 0; }
+
+/* ---------- 🎞 Contenido ---------- */
+.media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.media { display: flex; flex-direction: column; border-radius: 14px; overflow: hidden; background: var(--panel-2); border: 1px solid var(--line); }
+.media img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: var(--bg); }
+.media-info { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.media-title { font-weight: 700; color: var(--text); text-decoration: none; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+a.media-title:hover { text-decoration: underline; }
+.emote-admin { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+.emote-item { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px; border-radius: 12px; background: var(--bg); text-align: center; }
+.emote-item img { width: 56px; height: 56px; object-fit: contain; }
+.dm-list { display: flex; flex-direction: column; gap: 8px; max-height: 50vh; overflow-y: auto; padding: 4px; }
+.dm { max-width: 80%; padding: 8px 12px; border-radius: 14px; overflow-wrap: anywhere; }
+.dm.mine { align-self: flex-end; background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; border-bottom-right-radius: 4px; }
+.dm.mine .sub { color: rgba(255, 255, 255, .75); }
+.dm.theirs { align-self: flex-start; background: var(--panel-3); border-bottom-left-radius: 4px; }
+.li.unread { border-left: 3px solid var(--accent); }
+.rail-badge.static { position: static; }
+input[type="date"], input[type="datetime-local"], .card input[type="number"], .card input[type="file"] {
+  min-height: 42px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit;
+}
+.ccl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
