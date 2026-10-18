@@ -1033,13 +1033,28 @@ let kickGen = 0;               // invalida ciclos de consulta anteriores al reco
 const kickTimers = new Map();  // canal → temporizador de su consulta
 const kickSeen = new Set();
 
+/*
+ * API pública de kick.com/api/v2/channels/{slug}{suffix}.
+ * Algunos slugs llevan "_" y otros lo cambian por "-" (Mango_B0y → mango-b0y):
+ * se prueba tal cual y, si Kick no lo encuentra, con guiones.
+ */
+async function kickPublic(slug, suffix = '', base = 'https://kick.com/api/v2/channels/') {
+  const s = String(slug).toLowerCase();
+  try {
+    return await fetchJson(base + encodeURIComponent(s) + suffix);
+  } catch (e) {
+    if (!s.includes('_') || !/404/.test(e.message)) throw e;
+    return fetchJson(base + encodeURIComponent(s.replace(/_/g, '-')) + suffix);
+  }
+}
+
 // Los mensajes se piden con el ID del canal (no el del chatroom, que a veces es distinto)
 async function resolveKickChannel(slug, allowManual) {
   if (allowManual && cfg.kickChatroomId) return String(cfg.kickChatroomId).trim();
   const cached = store.get('kickChan.' + slug, null);
   if (cached) return cached;
   // En las URL de Kick los "_" del nombre de usuario se escriben como "-"
-  const j = await fetchJson('https://kick.com/api/v2/channels/' + encodeURIComponent(slug.replace(/_/g, '-')));
+  const j = await kickPublic(slug);
   if (!j || !j.id) throw new Error('no existe');
   store.set('kickChan.' + slug, String(j.id));
   return String(j.id);
@@ -1279,7 +1294,8 @@ async function kickApi(method, path, body, retried) {
 
 async function kickBroadcasterId(slug) {
   if (kickBroadcasters[slug]) return kickBroadcasters[slug];
-  const j = await kickApi('GET', 'channels?slug=' + encodeURIComponent(slug.replace(/_/g, '-')));
+  let j = await kickApi('GET', 'channels?slug=' + encodeURIComponent(slug.toLowerCase()));
+  if (!(j.data && j.data[0]) && slug.includes('_')) j = await kickApi('GET', 'channels?slug=' + encodeURIComponent(slug.toLowerCase().replace(/_/g, '-')));
   const ch = j.data && j.data[0];
   if (!ch) throw new Error('Kick no encontró el canal ' + slug);
   kickBroadcasters[slug] = ch.broadcaster_user_id;

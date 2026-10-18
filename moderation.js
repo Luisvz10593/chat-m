@@ -261,7 +261,7 @@ const MOD_LOADERS = {
       form.append(input, modBtn('Desbanear', 'ok', async () => {
         const name = input.value.trim().replace(/^@/, '');
         if (!name) return;
-        const u = await fetchJson('https://kick.com/api/v2/channels/' + encodeURIComponent(name.toLowerCase().replace(/_/g, '-')));
+        const u = await kickPublic(name);
         const userId = u && (u.user_id || (u.user && u.user.id));
         if (!userId) throw new Error('No encontré ese usuario en Kick');
         await kickApi('DELETE', 'moderation/bans', { broadcaster_user_id: await kickBroadcasterId(t.ch), user_id: Number(userId) });
@@ -697,7 +697,7 @@ async function openUserCard(m) {
     } else {
       // Kick: información pública del usuario en el canal
       try {
-        const u = await fetchJson(`https://kick.com/api/v2/channels/${encodeURIComponent(m.channel.replace(/_/g, '-'))}/users/${encodeURIComponent((m.login || m.user).toLowerCase())}`);
+        const u = await kickPublic(m.channel, '/users/' + encodeURIComponent((m.login || m.user).toLowerCase()));
         if (u.following_since) stat('sigue desde', ago(u.following_since).replace('hace ', ''));
         if (u.subscribed_for) stat('meses de sub', String(u.subscribed_for));
         if (u.banned) stat('estado', 'baneado');

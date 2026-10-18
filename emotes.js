@@ -235,7 +235,7 @@ async function loadEmotes(t) {
 }
 
 async function kickEmoteSets(slug) {
-  const sets = await fetchJson('https://kick.com/emotes/' + encodeURIComponent(slug.replace(/_/g, '-')));
+  const sets = await kickPublic(slug, '', 'https://kick.com/emotes/');
   const map = new Map();
   for (const s of sets || []) for (const e of s.emotes || []) map.set(e.name, e.id);
   kickEmoteMaps[slug] = map;

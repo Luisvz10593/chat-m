@@ -234,9 +234,9 @@ async function kickCurrent() {
   } catch (e) { officialErr = e.message; }
 
   let pub = null;
-  const slug = ((official && official.slug) || kickAuth.name || '').toLowerCase().replace(/_/g, '-');
+  const slug = ((official && official.slug) || kickAuth.name || '').toLowerCase();
   if (slug) {
-    try { pub = await fetchJson('https://kick.com/api/v2/channels/' + encodeURIComponent(slug)); } catch { /* sin respaldo */ }
+    try { pub = await kickPublic(slug); } catch { /* sin respaldo */ }
   }
   if (!official && !pub) throw new Error('Kick: ' + officialErr);
 
