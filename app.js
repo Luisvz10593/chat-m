@@ -30,6 +30,7 @@ const DEFAULTS = {
   fontSize: 19,
   showTime: true,
   wakeLock: true,
+  showModLog: true, // acciones de moderación de otros mods como avisos en el chat
 };
 
 const PLATFORMS = ['twitch', 'kick', 'starvios'];
@@ -93,6 +94,18 @@ const TWITCH_SCOPES = [
   'moderator:manage:automod',  // mensajes retenidos por AutoMod
   'channel:manage:redemptions', // recompensas y canjes creados desde Chat M
   'user:read:emotes',           // selector de emotes: todos los que puedes usar
+  // 🛡 Moderación
+  'moderation:read', 'moderator:read:banned_users', 'moderator:manage:unban_requests',
+  'moderator:manage:blocked_terms', 'moderator:manage:automod_settings', 'moderator:manage:shield_mode',
+  'moderator:manage:warnings', 'moderator:read:warnings', 'moderator:manage:suspicious_users',
+  'moderator:read:suspicious_users', 'channel:manage:moderators', 'channel:manage:vips',
+  'moderator:read:chatters', 'moderator:read:moderators', 'moderator:read:vips', 'moderator:read:chat_messages',
+  // 📊 Panel
+  'channel:read:subscriptions', 'bits:read', 'channel:read:goals', 'channel:read:hype_train', 'channel:read:charity',
+  // 🎞 Contenido y chat
+  'channel:manage:schedule', 'channel:manage:videos', 'channel:manage:clips', 'editor:manage:clips',
+  'user:manage:chat_color', 'user:manage:whispers', 'user:manage:blocked_users', 'user:read:blocked_users',
+  'user:read:follows', 'user:read:moderated_channels',
 ].join(' ');
 const twitchMissingScopes = () => !!auth && TWITCH_SCOPES.split(' ').some((s) => !(auth.scopes || []).includes(s));
 
@@ -1031,7 +1044,7 @@ function kickParts(text) {
    El Client Secret lo escribe el usuario en Ajustes y solo
    se guarda en este dispositivo (localStorage).
    ========================================================= */
-const KICK_SCOPES = 'user:read channel:read channel:write chat:write moderation:ban moderation:chat_message:manage ads:read ads:write channel:rewards:read channel:rewards:write';
+const KICK_SCOPES = 'user:read channel:read channel:write chat:write moderation:ban moderation:chat_message:manage ads:read ads:write channel:rewards:read channel:rewards:write kicks:read';
 const KICK_API = 'https://api.kick.com/public/v1/';
 let kickAuth = store.get('kickAuth', null); // { access, refresh, expiresAt, userId, name }
 const kickBroadcasters = {};                // canal → broadcaster_user_id
@@ -1410,6 +1423,9 @@ const PROVIDERS = {
     ban: (m, minutes) => twitchBan(m.channel, m.userId, minutes ? minutes * 60 : null),
     // Fija el mensaje arriba del chat hasta que termine el directo
     pin: (m) => helix('PUT', 'chat/pins', { broadcaster_id: requireRoom(m.channel), moderator_id: auth.userId, message_id: m.id }),
+    // Advertencia oficial de Twitch: el usuario debe aceptarla antes de volver a escribir
+    warn: (m, reason) => helix('POST', 'moderation/warnings', { broadcaster_id: requireRoom(m.channel), moderator_id: auth.userId },
+      { data: { user_id: m.userId, reason } }),
   },
   kick: {
     logged: () => !!kickAuth,
@@ -1459,6 +1475,7 @@ function openActions(m) {
   actions.querySelector('[data-act="mention"]').disabled = false;
   for (const b of actions.querySelectorAll('.mod')) b.disabled = !canMod;
   actions.querySelector('[data-act="pin"]').disabled = !canMod || !PROVIDERS[m.platform].pin;
+  actions.querySelector('[data-act="warn"]').disabled = !canMod || !PROVIDERS[m.platform].warn;
   actions.showModal();
 }
 
@@ -1495,6 +1512,12 @@ actions.addEventListener('click', async (e) => {
   try {
     if (act === 'delete') { await p.del(m); toast('Mensaje borrado.'); }
     if (act === 'pin') { await p.pin(m); toast(`Mensaje fijado en ${name}.`); }
+    if (act === 'warn') {
+      const reason = prompt(`Motivo de la advertencia para ${m.user}:`, 'Respeta las reglas del chat');
+      if (!reason) return;
+      await p.warn(m, reason.slice(0, 500));
+      toast(`${m.user} recibió una advertencia en ${name}.`);
+    }
     if (act === 'timeout60') { await p.ban(m, 1); toast(`${m.user}: timeout de 1 min en ${name}.`); }
     if (act === 'timeout600') { await p.ban(m, 10); toast(`${m.user}: timeout de 10 min en ${name}.`); }
     if (act === 'ban') { await p.ban(m, null); toast(`${m.user} fue baneado de ${name}.`); }
@@ -1504,6 +1527,13 @@ actions.addEventListener('click', async (e) => {
   } finally {
     btn.disabled = false;
   }
+});
+
+// "👤 Ver usuario": tarjeta con su información y acciones (moderation.js)
+$('#act-profile').addEventListener('click', () => {
+  const m = current;
+  actions.close();
+  if (m && typeof openUserCard === 'function') openUserCard(m);
 });
 
 $('#reply-cancel').addEventListener('click', clearReply);
@@ -1628,7 +1658,7 @@ function updateAuthUi() {
   const outdated = {
     twitch: twitchMissingScopes(),
     kick: !!kickAuth && (kickAuth.scope === undefined
-      || (!!kickAuth.scope && ['channel:write', 'ads:write', 'channel:rewards:write'].some((s) => !kickAuth.scope.includes(s)))),
+      || (!!kickAuth.scope && ['channel:write', 'ads:write', 'channel:rewards:write', 'kicks:read'].some((s) => !kickAuth.scope.includes(s)))),
     starvios: false,
   };
   for (const [p, who] of rows) {

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0e0e12">
+  <meta name="theme-color" content="#0b0d14">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -14,39 +14,168 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">Chat <b>M</b></div>
-    <!-- Un botón por canal; se generan desde app.js -->
-    <div class="chips" id="chips"></div>
-    <button class="icon-btn" id="btn-tools" aria-label="Herramientas: encuestas, predicciones, anuncios y más" title="Herramientas">🧰</button>
-    <button class="icon-btn" id="btn-stream" aria-label="Directo: título, categoría y tags" title="Directo">🎬</button>
-    <button class="icon-btn" id="btn-settings" aria-label="Ajustes">⚙</button>
-  </header>
+<div class="app">
+  <!-- Menú de secciones: lateral en pantallas anchas, abajo en las angostas -->
+  <nav class="rail" id="rail" aria-label="Secciones">
+    <div class="rail-brand" aria-hidden="true">M</div>
+    <button type="button" data-page="chat" aria-current="page"><span class="ri">💬</span><small>Chat</small></button>
+    <button type="button" data-page="mod"><span class="ri">🛡</span><small>Moderar</small><b class="rail-badge" id="badge-mod" hidden></b></button>
+    <button type="button" data-page="panel"><span class="ri">📊</span><small>Panel</small></button>
+    <button type="button" data-page="tools" id="btn-tools"><span class="ri">🧰</span><small>Herram.</small></button>
+    <button type="button" data-page="stream" id="btn-stream"><span class="ri">🎬</span><small>Directo</small></button>
+    <button type="button" data-page="content"><span class="ri">🎞</span><small>Contenido</small></button>
+    <div class="rail-spacer"></div>
+    <button type="button" id="btn-settings"><span class="ri">⚙</span><small>Ajustes</small></button>
+  </nav>
 
-  <main id="feed" aria-live="polite"></main>
+  <div class="workspace" id="workspace" data-page="chat">
 
-  <button id="jump" hidden>↓ Mensajes nuevos</button>
+    <!-- ===== Chat ===== -->
+    <section class="view view-chat" id="view-chat">
+      <header class="topbar">
+        <div class="brand">Chat <b>M</b></div>
+        <!-- Un botón por canal; se generan desde app.js -->
+        <div class="chips" id="chips"></div>
+        <div id="pinned-bar" class="pinned-bar" hidden></div>
+      </header>
 
-  <footer class="composer">
-    <!-- Selector de emojis y emotes -->
-    <div id="emote-panel" hidden>
-      <nav id="emote-tabs" class="tl-tabs"></nav>
-      <input id="emote-search" placeholder="🔍 Buscar…" autocomplete="off" autocapitalize="off">
-      <p id="emote-note" class="note">Elige un canal concreto en el selector para ver sus emotes. Con "Todos" usa emojis.</p>
-      <div id="emote-grid"></div>
-    </div>
-    <div id="reply-bar" hidden>
-      <span id="reply-text"></span>
-      <button class="icon-btn small" id="reply-cancel" aria-label="Cancelar respuesta">✕</button>
-    </div>
-    <form id="send-form" autocomplete="off">
-      <select id="target" class="target" aria-label="Plataforma donde escribir"></select>
-      <button type="button" id="emote-btn" class="icon-btn" aria-label="Emojis y emotes" title="Emojis y emotes">😀</button>
-      <input id="input" maxlength="500" placeholder="Escribe en el chat…" enterkeyhint="send">
-      <button type="submit" id="send-btn">Enviar</button>
-    </form>
-    <button id="login-cta" class="cta" hidden>Inicia sesión en ⚙ Ajustes para escribir y moderar</button>
-  </footer>
+      <main id="feed" aria-live="polite"></main>
+
+      <button id="jump" hidden>↓ Mensajes nuevos</button>
+
+      <footer class="composer">
+        <!-- Selector de emojis y emotes -->
+        <div id="emote-panel" hidden>
+          <nav id="emote-tabs" class="tl-tabs"></nav>
+          <input id="emote-search" placeholder="🔍 Buscar…" autocomplete="off" autocapitalize="off">
+          <p id="emote-note" class="note">Elige un canal concreto en el selector para ver sus emotes. Con "Todos" usa emojis.</p>
+          <div id="emote-grid"></div>
+        </div>
+        <div id="reply-bar" hidden>
+          <span id="reply-text"></span>
+          <button class="icon-btn small" id="reply-cancel" aria-label="Cancelar respuesta">✕</button>
+        </div>
+        <form id="send-form" autocomplete="off">
+          <select id="target" class="target" aria-label="Plataforma donde escribir"></select>
+          <button type="button" id="emote-btn" class="icon-btn" aria-label="Emojis y emotes" title="Emojis y emotes">😀</button>
+          <input id="input" maxlength="500" placeholder="Escribe en el chat…" enterkeyhint="send">
+          <button type="submit" id="send-btn">Enviar</button>
+        </form>
+        <button id="login-cta" class="cta" hidden>Inicia sesión en ⚙ Ajustes para escribir y moderar</button>
+      </footer>
+    </section>
+
+    <!-- ===== Secciones (las dibujan moderation.js, dashboard.js y content.js) ===== -->
+    <section class="view page" id="page-mod" hidden></section>
+    <section class="view page" id="page-panel" hidden></section>
+    <section class="view page" id="page-content" hidden></section>
+
+    <!-- ===== Directo: título, categoría y tags ===== -->
+    <section class="view page" id="stream" hidden>
+      <div class="sheet stream">
+        <header class="st-head">
+          <div>
+            <h2>🎬 Directo</h2>
+            <p class="note" id="st-subtitle">Título, categoría y tags de tus canales</p>
+          </div>
+          <button type="button" id="st-close" class="icon-btn page-close" aria-label="Cerrar">✕</button>
+        </header>
+
+        <div class="st-body">
+          <!-- Vista principal -->
+          <div id="st-main" class="stack">
+            <section class="stack">
+              <div class="st-section-head">
+                <h3>Estado actual</h3>
+                <button type="button" id="st-refresh" class="link-btn">↻ Actualizar</button>
+              </div>
+              <p class="note">Toca una tarjeta para incluirla o quitarla de los cambios.</p>
+              <div id="st-cards" class="st-cards"></div>
+              <p id="st-note" class="note warn" hidden></p>
+            </section>
+
+            <div class="seg" role="tablist">
+              <button type="button" role="tab" data-tab="quick" aria-selected="true">⚡ Categoría rápida</button>
+              <button type="button" role="tab" data-tab="edit" aria-selected="false">✏️ Editar todo</button>
+            </div>
+
+            <section id="tab-quick" class="stack">
+              <p class="note">Toca una categoría para cambiarla en los canales marcados. Te pediremos confirmar.</p>
+              <div id="st-favs" class="cat-grid"></div>
+              <div id="st-recent-box" class="stack" hidden>
+                <h4>Recientes</h4>
+                <div id="st-recent" class="cat-grid"></div>
+              </div>
+              <button type="button" id="st-edit-favs" class="link-btn">Quitar favoritas</button>
+            </section>
+
+            <section id="tab-edit" class="stack" hidden>
+              <div class="field">
+                <div class="field-head">
+                  <label for="st-title">Título <span class="mod-badge" id="st-title-mod" hidden>modificado</span></label>
+                  <span id="st-title-count" class="count">0/140</span>
+                </div>
+                <input id="st-title" maxlength="140" autocomplete="off" placeholder="Título del directo">
+              </div>
+
+              <div class="field">
+                <div class="field-head">
+                  <label for="st-cat-search">Categoría <span class="mod-badge" id="st-cat-mod" hidden>modificada</span></label>
+                </div>
+                <div id="st-cat-selected"></div>
+                <input id="st-cat-search" placeholder="🔍 Buscar categoría…  (☆ = guardar en favoritas)" autocomplete="off">
+                <div id="st-cat-results" class="cat-list"></div>
+              </div>
+
+              <div class="field">
+                <div class="field-head">
+                  <label for="st-tag-input">Tags <span class="mod-badge" id="st-tags-mod" hidden>modificados</span></label>
+                  <span id="st-tags-count" class="count">0/10</span>
+                </div>
+                <div id="st-tags" class="tags-box">
+                  <input id="st-tag-input" placeholder="Escribe un tag y pulsa Enter" autocomplete="off" autocapitalize="off">
+                </div>
+                <p class="note">En Twitch y Starvios los tags se guardan sin espacios ni símbolos. En Starvios solo se cambian los de tu propio canal.</p>
+              </div>
+
+              <div id="st-extra" class="stack"></div>
+
+              <button type="button" id="st-reset" class="link-btn">↺ Deshacer cambios</button>
+            </section>
+          </div>
+
+          <!-- Revisión y resultados -->
+          <div id="st-review" class="stack" hidden>
+            <h3 id="st-review-title">Revisa los cambios</h3>
+            <p class="note" id="st-review-note">Esto es lo que se va a cambiar en cada canal:</p>
+            <div id="st-review-list" class="st-review"></div>
+          </div>
+        </div>
+
+        <footer class="st-foot">
+          <button type="button" id="st-back" hidden>← Volver</button>
+          <button type="button" id="st-primary" class="primary">Revisar cambios</button>
+        </footer>
+      </div>
+    </section>
+
+    <!-- ===== Herramientas: encuestas, predicciones, anuncios, marcadores, publicidad… ===== -->
+    <section class="view page" id="tools" hidden>
+      <div class="sheet stream">
+        <header class="st-head">
+          <div>
+            <h2>🧰 Herramientas</h2>
+            <p class="note">Encuestas, predicciones, anuncios y más</p>
+          </div>
+          <button type="button" id="tl-close" class="icon-btn page-close" aria-label="Cerrar">✕</button>
+        </header>
+        <nav id="tl-tabs" class="tl-tabs" aria-label="Herramientas"></nav>
+        <div class="st-body" id="tl-body"></div>
+      </div>
+    </section>
+
+  </div><!-- /workspace -->
+</div><!-- /app -->
 
   <!-- Acciones sobre un mensaje -->
   <dialog id="actions">
@@ -54,6 +183,7 @@
       <div class="sheet-head">
         <span class="badge-platform" id="act-platform"></span>
         <strong id="act-user"></strong>
+        <button type="button" class="link-btn" id="act-profile">👤 Ver usuario</button>
       </div>
       <p id="act-text" class="act-text"></p>
       <p id="act-note" class="note" hidden></p>
@@ -64,21 +194,26 @@
         <button data-act="pin" class="mod">📌 Fijar mensaje</button>
         <button data-act="timeout60" class="mod">⏱ Timeout 1 min</button>
         <button data-act="timeout600" class="mod">⏱ Timeout 10 min</button>
+        <button data-act="warn" class="mod">⚠️ Advertir</button>
         <button data-act="ban" class="mod danger">⛔ Banear</button>
       </div>
       <button class="close" data-act="close">Cancelar</button>
     </div>
   </dialog>
 
+  <!-- Tarjeta de usuario (moderation.js) -->
+  <dialog id="user-card"></dialog>
+
   <!-- Ajustes -->
   <dialog id="settings">
     <form class="sheet" id="settings-form" method="dialog">
-      <h2>Ajustes</h2>
+      <h2>⚙ Ajustes</h2>
 
       <p class="note">Puedes poner varios canales por plataforma, separados por coma.</p>
       <label>Canales de Twitch
         <input name="twitchChannel" placeholder="tu_canal, otro_canal" autocapitalize="off" spellcheck="false">
       </label>
+      <button type="button" id="add-mod-channels" class="link-btn">＋ Agregar los canales de Twitch donde soy moderador</button>
       <label>Canales de Kick
         <input name="kickChannel" placeholder="tu_canal, otro_canal" autocapitalize="off" spellcheck="false">
       </label>
@@ -131,11 +266,17 @@
         </div>
       </fieldset>
 
+      <fieldset>
+        <legend>Tu nombre en el chat de Twitch</legend>
+        <div class="row" id="color-row"></div>
+      </fieldset>
+
       <label>Tamaño de letra
         <input type="range" name="fontSize" min="14" max="30" step="1">
       </label>
       <label class="check"><input type="checkbox" name="showTime"> Mostrar hora</label>
       <label class="check"><input type="checkbox" name="wakeLock"> Mantener la pantalla encendida</label>
+      <label class="check"><input type="checkbox" name="showModLog"> Mostrar en el chat las acciones de moderación</label>
 
       <details>
         <summary>Avanzado (Kick)</summary>
@@ -153,111 +294,10 @@
     </form>
   </dialog>
 
-  <!-- Directo: título, categoría y tags -->
-  <dialog id="stream" class="stream-dialog">
-    <div class="sheet stream">
-      <header class="st-head">
-        <div>
-          <h2>Directo</h2>
-          <p class="note" id="st-subtitle">Título, categoría y tags de tus canales</p>
-        </div>
-        <button type="button" id="st-close" class="icon-btn" aria-label="Cerrar">✕</button>
-      </header>
-
-      <div class="st-body">
-        <!-- Vista principal -->
-        <div id="st-main" class="stack">
-          <section class="stack">
-            <div class="st-section-head">
-              <h3>Estado actual</h3>
-              <button type="button" id="st-refresh" class="link-btn">↻ Actualizar</button>
-            </div>
-            <p class="note">Toca una tarjeta para incluirla o quitarla de los cambios.</p>
-            <div id="st-cards" class="st-cards"></div>
-            <p id="st-note" class="note warn" hidden></p>
-          </section>
-
-          <div class="seg" role="tablist">
-            <button type="button" role="tab" data-tab="quick" aria-selected="true">⚡ Categoría rápida</button>
-            <button type="button" role="tab" data-tab="edit" aria-selected="false">✏️ Editar todo</button>
-          </div>
-
-          <section id="tab-quick" class="stack">
-            <p class="note">Toca una categoría para cambiarla en los canales marcados. Te pediremos confirmar.</p>
-            <div id="st-favs" class="cat-grid"></div>
-            <div id="st-recent-box" class="stack" hidden>
-              <h4>Recientes</h4>
-              <div id="st-recent" class="cat-grid"></div>
-            </div>
-            <button type="button" id="st-edit-favs" class="link-btn">Quitar favoritas</button>
-          </section>
-
-          <section id="tab-edit" class="stack" hidden>
-            <div class="field">
-              <div class="field-head">
-                <label for="st-title">Título <span class="mod-badge" id="st-title-mod" hidden>modificado</span></label>
-                <span id="st-title-count" class="count">0/140</span>
-              </div>
-              <input id="st-title" maxlength="140" autocomplete="off" placeholder="Título del directo">
-            </div>
-
-            <div class="field">
-              <div class="field-head">
-                <label for="st-cat-search">Categoría <span class="mod-badge" id="st-cat-mod" hidden>modificada</span></label>
-              </div>
-              <div id="st-cat-selected"></div>
-              <input id="st-cat-search" placeholder="🔍 Buscar categoría…  (☆ = guardar en favoritas)" autocomplete="off">
-              <div id="st-cat-results" class="cat-list"></div>
-            </div>
-
-            <div class="field">
-              <div class="field-head">
-                <label for="st-tag-input">Tags <span class="mod-badge" id="st-tags-mod" hidden>modificados</span></label>
-                <span id="st-tags-count" class="count">0/10</span>
-              </div>
-              <div id="st-tags" class="tags-box">
-                <input id="st-tag-input" placeholder="Escribe un tag y pulsa Enter" autocomplete="off" autocapitalize="off">
-              </div>
-              <p class="note">En Twitch y Starvios los tags se guardan sin espacios ni símbolos. En Starvios solo se cambian los de tu propio canal.</p>
-            </div>
-
-            <button type="button" id="st-reset" class="link-btn">↺ Deshacer cambios</button>
-          </section>
-        </div>
-
-        <!-- Revisión y resultados -->
-        <div id="st-review" class="stack" hidden>
-          <h3 id="st-review-title">Revisa los cambios</h3>
-          <p class="note" id="st-review-note">Esto es lo que se va a cambiar en cada canal:</p>
-          <div id="st-review-list" class="st-review"></div>
-        </div>
-      </div>
-
-      <footer class="st-foot">
-        <button type="button" id="st-back" hidden>← Volver</button>
-        <button type="button" id="st-primary" class="primary">Revisar cambios</button>
-      </footer>
-    </div>
-  </dialog>
-
-  <!-- Herramientas: encuestas, predicciones, anuncios, marcadores, publicidad… -->
-  <dialog id="tools" class="stream-dialog">
-    <div class="sheet stream">
-      <header class="st-head">
-        <div>
-          <h2>Herramientas</h2>
-          <p class="note">Encuestas, predicciones, anuncios y más</p>
-        </div>
-        <button type="button" id="tl-close" class="icon-btn" aria-label="Cerrar">✕</button>
-      </header>
-      <nav id="tl-tabs" class="tl-tabs" aria-label="Herramientas"></nav>
-      <div class="st-body" id="tl-body"></div>
-    </div>
-  </dialog>
-
   <div id="toast" role="status"></div>
 
   <script src="app.js"></script>
+  <script src="nav.js"></script>
   <script src="stream.js"></script>
   <script src="tools.js"></script>
   <script src="emotes.js"></script>
