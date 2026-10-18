@@ -682,3 +682,30 @@ section[hidden], #st-main[hidden], #st-review[hidden] { display: none; }
 .toggle input::after { content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform .2s; }
 .toggle input:checked { background: var(--ok); }
 .toggle input:checked::after { transform: translateX(20px); }
+
+/* ---------- 🛡 Moderación ---------- */
+.shield-card.on { border-color: var(--warn); background: linear-gradient(90deg, rgba(251, 191, 36, .14), var(--panel-2)); }
+.li.clickable { cursor: pointer; }
+.li.clickable:hover { background: var(--panel-3); }
+.li[hidden] { display: none; }
+.mod-search {
+  min-height: 40px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--text); font: inherit;
+}
+.am-level { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.am-level:last-child { border-bottom: 0; }
+.toggle-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.card select {
+  min-height: 42px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit;
+}
+
+/* Tarjeta de usuario */
+#user-card { width: min(560px, 100vw - 24px); }
+.sheet.uc { gap: 12px; }
+.uc .sheet-head { gap: 10px; }
+.uc .sheet-head .grow { flex: 1; font-size: 20px; }
+.uc-avatar { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; }
+.uc-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.uc h4 { margin: 4px 0 0; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.uc .list { max-height: 260px; overflow-y: auto; }
+#actions .sheet-head .link-btn { margin-left: auto; padding: 4px 0; }

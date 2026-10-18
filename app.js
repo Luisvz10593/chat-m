@@ -807,14 +807,43 @@ async function subscribeEventSub(ch) {
   const room = twitchRooms[ch];
   if (!esSession || !room || !auth) return;
   const asMod = { broadcaster_user_id: room, moderator_user_id: auth.userId };
+  const own = { broadcaster_user_id: room };
+  // [tipo, versión, condición, permiso necesario]
   const subs = [
     ['channel.follow', '2', asMod, 'moderator:read:followers'],
     // Mensajes que AutoMod retiene para revisión, y cuando alguien los resuelve
     ['automod.message.hold', '2', asMod, 'moderator:manage:automod'],
     ['automod.message.update', '2', asMod, 'moderator:manage:automod'],
+    // 🛡 Moderación: registro de acciones, sospechosos, desbaneos, escudo, advertencias
+    ['channel.moderate', '2', asMod, 'moderator:read:warnings'],
+    ['channel.suspicious_user.message', '1', asMod, 'moderator:read:suspicious_users'],
+    ['channel.unban_request.create', '1', asMod, 'moderator:manage:unban_requests'],
+    ['channel.unban_request.resolve', '1', asMod, 'moderator:manage:unban_requests'],
+    ['channel.shield_mode.begin', '1', asMod, 'moderator:manage:shield_mode'],
+    ['channel.shield_mode.end', '1', asMod, 'moderator:manage:shield_mode'],
+    ['channel.warning.acknowledge', '1', asMod, 'moderator:read:warnings'],
+    ['channel.shoutout.receive', '1', asMod, 'moderator:manage:shoutouts'],
   ];
   if (room === auth.userId) {
-    subs.push(['channel.channel_points_custom_reward_redemption.add', '1', { broadcaster_user_id: room }, 'channel:read:redemptions']);
+    // Solo del canal propio
+    subs.push(
+      ['channel.channel_points_custom_reward_redemption.add', '1', own, 'channel:read:redemptions'],
+      ['channel.hype_train.begin', '2', own, 'channel:read:hype_train'],
+      ['channel.hype_train.progress', '2', own, 'channel:read:hype_train'],
+      ['channel.hype_train.end', '2', own, 'channel:read:hype_train'],
+      ['channel.goal.begin', '1', own, 'channel:read:goals'],
+      ['channel.goal.progress', '1', own, 'channel:read:goals'],
+      ['channel.goal.end', '1', own, 'channel:read:goals'],
+      ['channel.charity_campaign.donate', '1', own, 'channel:read:charity'],
+      ['channel.ad_break.begin', '1', own, 'channel:read:ads'],
+      ['channel.custom_power_up_redemption.add', '1', own, 'bits:read'],
+      ['channel.poll.begin', '1', own, 'channel:manage:polls'],
+      ['channel.poll.end', '1', own, 'channel:manage:polls'],
+      ['channel.prediction.begin', '1', own, 'channel:manage:predictions'],
+      ['channel.prediction.end', '1', own, 'channel:manage:predictions'],
+      ['stream.online', '1', own, 'channel:read:ads'],
+      ['stream.offline', '1', own, 'channel:read:ads'],
+    );
   }
   for (const [type, version, condition, scope] of subs) {
     const key = type + ':' + room;
@@ -827,8 +856,40 @@ async function subscribeEventSub(ch) {
   }
 }
 
+// Otros módulos (Moderación, Panel) escuchan eventos con onTwitchEvent(fn)
+const TW_EVENT_LISTENERS = [];
+const onTwitchEvent = (fn) => TW_EVENT_LISTENERS.push(fn);
+
 function handleEventSub(type, ev) {
   const ch = ev.broadcaster_user_login;
+  for (const fn of TW_EVENT_LISTENERS) { try { fn(type, ev); } catch (e) { console.warn(e); } }
+  twitchEventToChat(type, ev, ch);
+}
+
+// Avisos en el chat para los eventos de EventSub
+function twitchEventToChat(type, ev, ch) {
+  const fmtN = (n) => Number(n || 0).toLocaleString('es');
+  const simple = {
+    'channel.hype_train.begin': () => `🚂 ¡Empezó un Hype Train! Nivel ${ev.level || 1}`,
+    'channel.hype_train.end': () => `🚂 Terminó el Hype Train en el nivel ${ev.level}`,
+    'channel.goal.begin': () => `🎯 Nueva meta: ${ev.description || ev.type} (${fmtN(ev.current_amount)}/${fmtN(ev.target_amount)})`,
+    'channel.goal.end': () => `🎯 Meta ${ev.is_achieved ? 'lograda' : 'terminada'}: ${ev.description || ev.type} (${fmtN(ev.current_amount)}/${fmtN(ev.target_amount)})`,
+    'channel.charity_campaign.donate': () => `💝 ${ev.user_name} donó ${ev.amount ? (ev.amount.value / 10 ** ev.amount.decimal_places).toLocaleString('es', { style: 'currency', currency: ev.amount.currency }) : ''} a ${ev.charity_name}`,
+    'channel.ad_break.begin': () => `📺 Empezó una pausa publicitaria de ${ev.duration_seconds} s${ev.is_automatic ? ' (automática)' : ''}`,
+    'channel.custom_power_up_redemption.add': () => `⚡ ${ev.user_name} usó el Power-up "${ev.reward && ev.reward.title}"`,
+    'channel.poll.begin': () => `📊 Empezó la encuesta: ${ev.title}`,
+    'channel.poll.end': () => `📊 Terminó la encuesta "${ev.title}"${ev.choices ? ' — ganó: ' + [...ev.choices].sort((a, b) => (b.votes || 0) - (a.votes || 0))[0].title : ''}`,
+    'channel.prediction.begin': () => `🔮 Empezó la predicción: ${ev.title}`,
+    'channel.prediction.end': () => `🔮 Terminó la predicción "${ev.title}"${ev.winning_outcome_id && ev.outcomes ? ' — ganó: ' + (ev.outcomes.find((o) => o.id === ev.winning_outcome_id) || {}).title : ''}`,
+    'stream.online': () => '🔴 ¡El directo empezó!',
+    'stream.offline': () => '⚫ El directo terminó',
+    'channel.shoutout.receive': () => `📢 ${ev.from_broadcaster_user_name} te dio un shoutout`,
+    'channel.shield_mode.begin': () => `🛡 ${ev.moderator_user_name} activó el modo escudo`,
+    'channel.shield_mode.end': () => `🛡 ${ev.moderator_user_name} desactivó el modo escudo`,
+    'channel.unban_request.create': () => `📨 ${ev.user_name} pidió que le quiten el ban: "${ev.text}"`,
+    'channel.warning.acknowledge': () => `⚠️ ${ev.user_name} aceptó la advertencia`,
+  };
+  if (simple[type]) { addSystem('twitch', simple[type](), true, ch); return; }
   if (type === 'channel.follow') {
     addSystem('twitch', `❤️ ${ev.user_name} empezó a seguir el canal`, true, ch);
   } else if (type === 'automod.message.hold') {
@@ -838,7 +899,57 @@ function handleEventSub(type, ev) {
   } else if (type === 'channel.channel_points_custom_reward_redemption.add') {
     const r = ev.reward || {};
     addSystem('twitch', `🏆 ${ev.user_name} canjeó "${r.title}" (${r.cost} puntos)${ev.user_input ? ' — ' + ev.user_input : ''}`, true, ch);
+  } else if (type === 'channel.suspicious_user.message') {
+    const why = (ev.types || []).includes('ban_evader') || ev.ban_evasion_evaluation === 'likely' ? 'posible evasión de ban'
+      : (ev.shared_ban_channel_ids || []).length ? 'baneado en otros canales' : 'usuario vigilado';
+    const status = ev.low_trust_status === 'restricted' ? 'restringido (solo lo ven los mods)' : 'vigilado';
+    addSystem('twitch', `👁 ${ev.user_name} (${why}, ${status}): ${(ev.message && ev.message.text) || ''}`, true, ch);
+  } else if (type === 'channel.moderate' && cfg.showModLog) {
+    const text = modActionText(ev);
+    if (text) addSystem('twitch', '🛡 ' + text, false, ch);
   }
+}
+
+// Texto en español para una acción de moderación (channel.moderate)
+function modActionText(ev) {
+  const by = ev.moderator_user_name || 'Un moderador';
+  const a = ev.action;
+  const d = ev[a] || ev[a.replace('shared_chat_', '')] || {};
+  const who = d.user_name || d.user_login || '';
+  const mins = (s) => (s >= 3600 ? `${Math.round(s / 3600)} h` : s >= 60 ? `${Math.round(s / 60)} min` : `${s} s`);
+  const map = {
+    ban: () => `${by} baneó a ${who}${d.reason ? ' — ' + d.reason : ''}`,
+    timeout: () => `${by} dio timeout a ${who}${d.expires_at ? ' por ' + mins((Date.parse(d.expires_at) - Date.now()) / 1000) : ''}${d.reason ? ' — ' + d.reason : ''}`,
+    unban: () => `${by} desbaneó a ${who}`,
+    untimeout: () => `${by} quitó el timeout a ${who}`,
+    delete: () => `${by} borró un mensaje de ${who}${d.message_body ? ': "' + d.message_body + '"' : ''}`,
+    warn: () => `${by} advirtió a ${who}${d.reason ? ' — ' + d.reason : ''}`,
+    clear: () => `${by} limpió el chat`,
+    mod: () => `${by} hizo moderador a ${who}`,
+    unmod: () => `${by} quitó moderador a ${who}`,
+    vip: () => `${by} hizo VIP a ${who}`,
+    unvip: () => `${by} quitó VIP a ${who}`,
+    raid: () => `${by} inició un raid a ${d.user_name || d.user_login}`,
+    unraid: () => `${by} canceló el raid`,
+    slow: () => `${by} activó el modo lento (${d.wait_time_seconds} s)`,
+    slowoff: () => `${by} desactivó el modo lento`,
+    followers: () => `${by} activó solo seguidores`,
+    followersoff: () => `${by} desactivó solo seguidores`,
+    subscribers: () => `${by} activó solo subs`,
+    subscribersoff: () => `${by} desactivó solo subs`,
+    emoteonly: () => `${by} activó solo emotes`,
+    emoteonlyoff: () => `${by} desactivó solo emotes`,
+    uniquechat: () => `${by} activó mensajes únicos`,
+    uniquechatoff: () => `${by} desactivó mensajes únicos`,
+    add_blocked_term: () => `${by} bloqueó términos: ${(d.terms || []).join(', ')}`,
+    remove_blocked_term: () => `${by} desbloqueó términos: ${(d.terms || []).join(', ')}`,
+    add_permitted_term: () => `${by} permitió términos: ${(d.terms || []).join(', ')}`,
+    remove_permitted_term: () => `${by} quitó términos permitidos: ${(d.terms || []).join(', ')}`,
+    approve_unban_request: () => `${by} aprobó la solicitud de desbaneo de ${who}`,
+    deny_unban_request: () => `${by} rechazó la solicitud de desbaneo de ${who}`,
+  };
+  const key = a.replace('shared_chat_', '');
+  return map[key] ? map[key]() : `${by}: ${a}`;
 }
 
 /* ---------- AutoMod: mensajes retenidos para revisión ----------
@@ -907,6 +1018,7 @@ function resolveAutomodCard(messageId, status, by) {
   actions.replaceChildren(Object.assign(document.createElement('span'), {
     className: 'am-status', textContent: label + (by && status !== 'expired' ? ` por ${by}` : ''),
   }));
+  if (typeof updateModBadge === 'function') updateModBadge();
 }
 
 /* =========================================================
