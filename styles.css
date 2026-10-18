@@ -731,3 +731,14 @@ section[hidden], #st-main[hidden], #st-review[hidden] { display: none; }
 .stat-grid { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }
 .stat { padding: 10px 12px; }
 .stat b { font-size: 22px; }
+
+/* ---------- Mejoras del chat ---------- */
+.tw-badge { height: 1.05em; width: auto; margin-right: 4px; vertical-align: -.15em; border-radius: 3px; }
+.pinned-bar { flex-direction: column; align-items: stretch; gap: 6px; }
+.pin-row { display: flex; align-items: center; gap: 10px; }
+.pin-row .pin-text { flex: 1; min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pin-row .plat-dot { display: inline-block; vertical-align: middle; }
+#color-row { gap: 8px; flex-wrap: wrap; }
+.swatch { width: 34px; height: 34px; border-radius: 50%; border: 3px solid transparent; }
+.swatch.on { border-color: #fff; }
+#color-row input[type="color"] { width: 44px; height: 34px; border: 0; background: none; padding: 0; }

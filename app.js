@@ -105,7 +105,7 @@ const TWITCH_SCOPES = [
   // 🎞 Contenido y chat
   'channel:manage:schedule', 'channel:manage:videos', 'channel:manage:clips', 'editor:manage:clips',
   'user:manage:chat_color', 'user:manage:whispers', 'user:manage:blocked_users', 'user:read:blocked_users',
-  'user:read:follows', 'user:read:moderated_channels',
+  'user:read:follows', 'user:read:moderated_channels', 'user:read:whispers',
 ].join(' ');
 const twitchMissingScopes = () => !!auth && TWITCH_SCOPES.split(' ').some((s) => !(auth.scopes || []).includes(s));
 
@@ -241,11 +241,16 @@ function addMessage(m) {
     content.append(ref);
   }
 
-  for (const b of m.badges || []) {
-    const p = document.createElement('span');
-    p.className = 'pill ' + b;
-    p.textContent = BADGE_LABELS[b] || b.toUpperCase();
-    content.append(p);
+  // Insignias: imágenes reales de Twitch si ya están cargadas (chatplus.js); si no, etiquetas de texto
+  const badgeImgs = typeof twitchBadgeImgs === 'function' ? twitchBadgeImgs(m) : null;
+  if (badgeImgs) content.append(...badgeImgs);
+  else {
+    for (const b of m.badges || []) {
+      const p = document.createElement('span');
+      p.className = 'pill ' + b;
+      p.textContent = BADGE_LABELS[b] || b.toUpperCase();
+      content.append(p);
+    }
   }
 
   const user = document.createElement('span');
@@ -555,8 +560,11 @@ function handleTwitchMsg(tags, prefix, text, channel) {
     tags.emotes = shiftEmotes(tags.emotes, cut);
   }
 
-  const parts = twitchParts(text, tags.emotes);
+  let parts = twitchParts(text, tags.emotes);
   const bits = Number(tags.bits) || 0;
+  const roomForAssets = shared ? tags['source-room-id'] : tags['room-id'];
+  // Bits: "Cheer100" se muestra con su imagen animada (chatplus.js)
+  if (bits && typeof cheerify === 'function') parts = cheerify(parts, roomForAssets);
   if (bits) parts.unshift({ text: `💎 ${bits} bits · ` });
 
   addMessage({
@@ -568,6 +576,9 @@ function handleTwitchMsg(tags, prefix, text, channel) {
     login: prefix.split('!')[0],
     color: tags.color,
     badges: [...new Set(badges)],
+    // Insignias completas ("subscriber/12") y canal del que tomarlas, para mostrarlas como imagen
+    twBadges: (badgeTag || '').split(',').filter(Boolean).map((b) => b.split('/')),
+    badgeRoom: roomForAssets,
     parts,
     event: bits > 0,
     time: tags['tmi-sent-ts'] ? new Date(Number(tags['tmi-sent-ts'])) : new Date(),
@@ -845,8 +856,10 @@ async function subscribeEventSub(ch) {
       ['stream.offline', '1', own, 'channel:read:ads'],
     );
   }
+  // Susurros que recibes (una sola vez por sesión, no por canal)
+  subs.push(['user.whisper.message', '1', { user_id: auth.userId }, 'user:read:whispers']);
   for (const [type, version, condition, scope] of subs) {
-    const key = type + ':' + room;
+    const key = type + ':' + (condition.user_id || room);
     if (esSubscribed.has(key) || !(auth.scopes || []).includes(scope)) continue;
     esSubscribed.add(key);
     try {
