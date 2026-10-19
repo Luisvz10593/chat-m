@@ -764,3 +764,56 @@ input[type="date"], input[type="datetime-local"], .card input[type="number"], .c
   min-height: 42px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit;
 }
 .ccl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+
+/* =========================================================
+   Arreglos de diseño (pantallas táctiles y celular)
+   ========================================================= */
+/* La app ocupa exactamente la pantalla: nunca más ancha ni con scroll de página
+   (si algo se salía, el celular se alejaba y quedaba un espacio negro) */
+html, body { overflow: hidden; overscroll-behavior: none; max-width: 100%; }
+.app { position: fixed; inset: 0; height: auto; max-width: 100vw; }
+
+/* Que las filas de pestañas, canales y botones nunca se aplasten cuando la
+   sección tiene mucho contenido (antes quedaban de 2 px y "desaparecían") */
+.st-body > *, .page > *:not(.st-body), .sheet > *:not(.st-body), .stack > *, .card > *,
+.view-chat > .topbar, .view-chat > .composer, #emote-panel > :not(#emote-grid) { flex-shrink: 0; }
+#emote-grid { flex: 1 1 auto; min-height: 0; }
+
+/* Fila para escribir: el campo se encoge, el selector no ocupa demasiado */
+#send-form { min-width: 0; }
+#send-form > * { min-width: 0; }
+#input { min-width: 0; flex: 1 1 0; }
+.target { max-width: 38%; text-overflow: ellipsis; font-size: 16px; }
+#send-btn { flex: none; }
+
+/* Rejillas: una columna nunca más ancha que la pantalla */
+.grid-cards { grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); }
+.dash-grid { grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr)); }
+.media-grid { grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)); }
+.st-cards { grid-template-columns: repeat(auto-fill, minmax(min(240px, 100%), 1fr)); }
+.ccl-grid, .toggle-grid { grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr)); }
+
+/* Botones fáciles de tocar en pantallas táctiles (mínimo 44 px) */
+@media (pointer: coarse) {
+  .choice.small, .pill-tabs button, .tl-tab, .btn, .icon-btn.small, .link-btn,
+  .cat-star, .pinned-bar button, .tag.removable button { min-height: 44px; }
+  .icon-btn.small, .tag.removable button { min-width: 44px; }
+  .link-btn { display: inline-flex; align-items: center; }
+  /* Campos a 16 px para que iPhone/Android no hagan zoom al tocarlos */
+  input, select, textarea { font-size: 16px !important; }
+}
+
+/* Celular */
+@media (max-width: 700px) {
+  .rail { overflow-x: hidden; }
+  .rail button { min-width: 0; flex: 1 1 0; padding: 4px 0; }
+  .rail button small { font-size: 9.5px; letter-spacing: -.01em; }
+  .rail button .ri { font-size: 20px; }
+  .composer { padding-left: 8px; padding-right: 8px; }
+  #send-form { gap: 6px; }
+  #send-btn { padding: 0 14px; }
+  .target { max-width: 34%; padding: 0 6px; }
+  .topbar { padding-left: 8px; padding-right: 8px; }
+  .page .st-body { padding: 12px; }
+  #emote-panel { left: 4px; right: 4px; }
+}
