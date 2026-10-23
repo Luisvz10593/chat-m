@@ -34,6 +34,7 @@ const emptyNote = (t) => el('p', 'empty', t);
 /* ---------- Dibujo ---------- */
 function renderDash() {
   const page = $('#page-panel');
+  const restore = keepScroll(page);
   const body = el('div', 'st-body');
   page.replaceChildren(pageHeader('📊', 'Panel en vivo', 'Lo que pasa en tus canales, actualizado cada 30 s'), body);
   const targets = modTargets();
@@ -58,6 +59,7 @@ function renderDash() {
   const content = el('div', 'stack');
   content.id = 'dash-content';
   body.append(pills, content);
+  restore();
   loadDash(content, targets);
 }
 
@@ -244,7 +246,15 @@ const DASH_CARDS = {
     },
     async (t) => {
       if (!t.own) return ownOnly('💎 Ranking de bits');
-      const j = await helix('GET', 'bits/leaderboard', { count: 10, period: DASH.bitsPeriod });
+      // Twitch a veces exige started_at (una fecha dentro del periodo, sin milisegundos);
+      // si aun así lo rechaza, muestra el ranking de siempre
+      const now = new Date(Date.now() - 60000).toISOString().replace(/\.\d+Z$/, 'Z');
+      const q = { count: 10, period: DASH.bitsPeriod };
+      let j;
+      try { j = await helix('GET', 'bits/leaderboard', DASH.bitsPeriod === 'all' ? q : { ...q, started_at: now }); } catch (e) {
+        if (!/started_at/i.test(e.message)) throw e;
+        try { j = await helix('GET', 'bits/leaderboard', q); } catch { DASH.bitsPeriod = 'all'; j = await helix('GET', 'bits/leaderboard', { count: 10, period: 'all' }); }
+      }
       return dashCard('💎 Ranking de bits',
         periodPicker([['day', 'Hoy'], ['week', 'Semana'], ['month', 'Mes'], ['year', 'Año'], ['all', 'Siempre']], DASH.bitsPeriod, (v) => { DASH.bitsPeriod = v; refreshDash(); }),
         rankList((j.data || []).map((r) => ({ name: r.user_name, score: r.score })), (r) => nf(r.score)));

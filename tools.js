@@ -145,7 +145,7 @@ function showTool(id) {
     body.append(el('p', 'note', 'Inicia sesión en ⚙ Ajustes con Twitch, Kick o Starvios para usar las herramientas.'));
     return;
   }
-  body.append(targetPicker(id));
+  if (id !== 'rewards') body.append(targetPicker(id)); // Canjes tiene su propia fila de canales
   RENDER[id](body);
 }
 
@@ -239,7 +239,7 @@ function field(label, input, counter) {
   const l = el('label', null, label);
   head.append(l);
   if (counter) {
-    const c = el('span', 'count', `0/${input.maxLength}`);
+    const c = el('span', 'count', `${input.value.length}/${input.maxLength}`);
     input.addEventListener('input', () => { c.textContent = `${input.value.length}/${input.maxLength}`; });
     head.append(c);
   }
@@ -696,358 +696,475 @@ const RENDER = {
 };
 
 /* =========================================================
-   🏆 Canjes: recompensas y canjes de puntos de tu canal
-   Twitch y Kick solo dejan gestionar (canjes, devolver puntos,
-   editar) las recompensas creadas desde la misma app, es decir,
-   desde Chat M. Starvios permite gestionar todas las de tu canal.
-   Ninguna permite dar o quitar puntos a mano.
+   🏆 Canjes: solicitudes y recompensas de tus canales
+   - 📥 Solicitudes: los canjes de todos tus canales juntos o de
+     uno solo; completar, devolver puntos (uno o todos).
+   - 🏆 Recompensas: activar, pausar, editar todo, crear y borrar.
+   Twitch y Kick solo dejan gestionar las recompensas creadas
+   desde la misma app (Chat M). Starvios permite todas. Ninguna
+   plataforma permite dar o quitar puntos a mano.
    ========================================================= */
+const RWS = { view: 'requests', ch: 'all', status: 'all', data: {}, sig: '', seq: 0 };
+const RW_STATUS = [['all', 'Todos'], ['pending', '⏳ Por revisar'], ['done', '✓ Completados'], ['refunded', '↩ Devueltos']];
+const RW_STATUS_TAG = { pending: '⏳ Por revisar', done: '✓ Completado', refunded: '↩ Devuelto' };
+const rwTargets = () => tlTargets.filter((t) => !SUPPORT.rewards(t));
+const nfp = (n) => Number(n || 0).toLocaleString('es');
+
+// Fila de opciones que cambia la selección sin volver a dibujarse (no regresa al inicio)
+function pillRow(options, value, onPick) {
+  const row = el('div', 'pill-tabs');
+  for (const [v, label, p] of options) {
+    const b = el('button');
+    b.type = 'button';
+    b.dataset.v = v;
+    b.setAttribute('aria-selected', String(v === value));
+    if (p) b.append(el('span', 'plat-dot ' + p));
+    b.append(el('span', null, label), el('span', 'pill-count'));
+    b.addEventListener('click', () => {
+      for (const x of row.children) x.setAttribute('aria-selected', String(x === b));
+      b.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+      onPick(v);
+    });
+    row.append(b);
+  }
+  return row;
+}
+
 RENDER.rewards = function (body) {
-  const sections = el('div', 'stack');
-  sections.id = 'tl-rw';
-  body.append(redeemSection());
-  body.append(
-    el('p', 'note warn', 'Twitch y Kick solo dejan ver los canjes, devolver puntos y editar las recompensas creadas desde Chat M. '
-      + 'Las que creaste en su web aparecen sin botones: usa "Duplicar en Chat M" y desactiva la original en su web. '
-      + 'Ninguna plataforma permite dar o quitar puntos a mano; solo devolver los de un canje.'),
-    sections, results(),
-  );
+  const targets = rwTargets();
+  if (!targets.length) {
+    body.append(el('p', 'note', 'Inicia sesión en ⚙ Ajustes con tu cuenta de Twitch, Kick o Starvios para ver los canjes de tu canal.'));
+    return;
+  }
+  if (RWS.ch !== 'all' && !targets.some((t) => t.id === RWS.ch)) RWS.ch = 'all';
+  RWS.sig = '';
+
+  const views = pillRow([['requests', '📥 Solicitudes'], ['rewards', '🏆 Recompensas']], RWS.view, (v) => {
+    RWS.view = v;
+    statusRow.hidden = v !== 'requests';
+    loadRewards();
+  });
+  views.classList.add('rw-views');
+  const chans = pillRow([['all', '🌐 Todos'], ...targets.map((t) => [t.id, t.ch, t.p])], RWS.ch, (v) => { RWS.ch = v; drawRewards(); });
+  chans.id = 'rw-chans';
+  const statusRow = pillRow(RW_STATUS, RWS.status, (v) => { RWS.status = v; loadRewards(); });
+  statusRow.hidden = RWS.view !== 'requests';
+  const bulk = el('div', 'rw-bulk');
+  bulk.id = 'rw-bulk';
+  const list = el('div', 'stack');
+  list.id = 'rw-list';
+  list.append(el('p', 'note', 'Cargando…'));
+  body.append(views, chans, statusRow, bulk, list,
+    el('p', 'note', 'Twitch y Kick solo dejan gestionar las recompensas creadas desde Chat M; las de su web aparecen como "solo lectura" '
+      + '(usa "Duplicar en Chat M" y desactiva la original). Ninguna plataforma permite dar o quitar puntos a mano: solo devolver los de un canje.'));
   loadRewards();
-  tlTimer = setInterval(loadRewards, 10000); // los canjes pendientes se actualizan solos
+  tlTimer = setInterval(() => { if (RWS.view === 'requests') loadRewards(); }, 15000); // las solicitudes se actualizan solas
 };
 
+/* ---------- Datos de cada plataforma (todo normalizado) ----------
+ * recompensa: { id, title, cost, enabled, paused, input, prompt, color, manage, ... }
+ * canje:      { id, rewardId, rewardTitle, cost, user, input, at, status: pending|done|refunded }
+ */
 const RW = {
   twitch: {
-    async list(t) {
+    async rewards(t) {
       const room = await twRoom(t);
       const [all, mine] = await Promise.all([
         helix('GET', 'channel_points/custom_rewards', { broadcaster_id: room }),
         helix('GET', 'channel_points/custom_rewards', { broadcaster_id: room, only_manageable_rewards: true }),
       ]);
       const own = new Set((mine.data || []).map((r) => r.id));
-      const rewards = (all.data || []).map((r) => ({
+      return (all.data || []).map((r) => ({
         id: r.id, title: r.title, cost: r.cost, enabled: r.is_enabled, paused: r.is_paused,
         input: r.is_user_input_required, prompt: r.prompt, color: r.background_color, manage: own.has(r.id),
+        skipQueue: r.should_redemptions_skip_request_queue,
+        maxStream: r.max_per_stream_setting && r.max_per_stream_setting.is_enabled ? r.max_per_stream_setting.max_per_stream : 0,
+        maxUserStream: r.max_per_user_per_stream_setting && r.max_per_user_per_stream_setting.is_enabled ? r.max_per_user_per_stream_setting.max_per_user_per_stream : 0,
+        cooldown: r.global_cooldown_setting && r.global_cooldown_setting.is_enabled ? r.global_cooldown_setting.global_cooldown_seconds : 0,
       }));
-      // Canjes pendientes de las recompensas que Chat M puede gestionar
-      const pending = [];
-      await Promise.all(rewards.filter((r) => r.manage).map(async (r) => {
-        const j = await helix('GET', 'channel_points/custom_rewards/redemptions', { broadcaster_id: room, reward_id: r.id, status: 'UNFULFILLED', first: 50 });
-        for (const x of j.data || []) pending.push({ id: x.id, reward: r, user: x.user_name, input: x.user_input, at: x.redeemed_at });
-      }));
-      return { rewards, pending };
     },
-    setRedemption: async (t, x, ok) => helix('PATCH', 'channel_points/custom_rewards/redemptions',
-      { id: x.id, broadcaster_id: await twRoom(t), reward_id: x.reward.id }, { status: ok ? 'FULFILLED' : 'CANCELED' }),
-    update: async (t, r, changes) => helix('PATCH', 'channel_points/custom_rewards', { broadcaster_id: await twRoom(t), id: r.id }, {
-      ...(changes.enabled !== undefined ? { is_enabled: changes.enabled } : {}),
-      ...(changes.paused !== undefined ? { is_paused: changes.paused } : {}),
-      ...(changes.cost !== undefined ? { cost: changes.cost } : {}),
-    }),
-    remove: async (t, r) => helix('DELETE', 'channel_points/custom_rewards', { broadcaster_id: await twRoom(t), id: r.id }),
-    create: async (t, f) => helix('POST', 'channel_points/custom_rewards', { broadcaster_id: await twRoom(t) }, {
-      title: f.title.slice(0, 45), cost: f.cost, prompt: f.prompt || undefined,
-      is_user_input_required: f.input, ...(f.color ? { background_color: f.color } : {}),
-    }),
-    canPause: true,
-  },
-  kick: {
-    async list() {
-      const [rw, rd] = await Promise.all([kickApi('GET', 'channels/rewards'), kickApi('GET', 'channels/rewards/redemptions?status=pending')]);
-      const manageIds = new Set();
-      const pending = [];
-      for (const g of rd.data || []) {
-        if (g.reward && g.reward.can_manage) manageIds.add(g.reward.id);
-        for (const x of g.redemptions || []) {
-          pending.push({ id: x.id, reward: { id: g.reward.id, title: g.reward.title, manage: !!g.reward.can_manage }, user: '#' + x.redeemer.user_id, input: x.user_input, at: x.redeemed_at });
+    async redemptions(t, rewards, status) {
+      const room = await twRoom(t);
+      const map = { pending: 'UNFULFILLED', done: 'FULFILLED', refunded: 'CANCELED' };
+      const wanted = status === 'all' ? Object.keys(map) : [status];
+      const out = [];
+      await Promise.all(rewards.filter((r) => r.manage).flatMap((r) => wanted.map(async (st) => {
+        const j = await helix('GET', 'channel_points/custom_rewards/redemptions', { broadcaster_id: room, reward_id: r.id, status: map[st], sort: 'NEWEST', first: 50 });
+        for (const x of j.data || []) out.push({ id: x.id, rewardId: r.id, rewardTitle: r.title, cost: x.reward ? x.reward.cost : r.cost, user: x.user_name, input: x.user_input, at: x.redeemed_at, status: st });
+      })));
+      return out;
+    },
+    async setRedemptions(t, list, ok) {
+      const room = await twRoom(t);
+      // Twitch acepta hasta 50 canjes de la misma recompensa por llamada
+      const byReward = {};
+      for (const x of list) (byReward[x.rewardId] = byReward[x.rewardId] || []).push(x.id);
+      for (const [rid, ids] of Object.entries(byReward)) {
+        for (let i = 0; i < ids.length; i += 50) {
+          const q = new URLSearchParams({ broadcaster_id: room, reward_id: rid });
+          for (const id of ids.slice(i, i + 50)) q.append('id', id);
+          await helix('PATCH', 'channel_points/custom_rewards/redemptions?' + q, null, { status: ok ? 'FULFILLED' : 'CANCELED' });
         }
       }
-      // Kick no dice en la lista de recompensas cuáles creó esta app: lo recordamos al crearlas
-      const created = new Set(store.get('kickRewardsMine', []));
-      const rewards = (rw.data || []).map((r) => ({
-        id: r.id, title: r.title, cost: r.cost, enabled: r.is_enabled, paused: r.is_paused,
-        input: r.is_user_input_required, prompt: r.description, color: r.background_color,
-        manage: created.has(r.id) || manageIds.has(r.id),
-      }));
-      for (const x of pending) x.reward.manage = x.reward.manage || created.has(x.reward.id);
-      return { rewards, pending: pending.filter((x) => x.reward.manage) };
     },
-    async setRedemption(t, x, ok) {
-      const j = await kickApi('POST', `channels/rewards/redemptions/${ok ? 'accept' : 'reject'}`, { ids: [x.id] });
-      const fail = j.data && j.data[0];
-      if (fail) throw new Error(`Kick lo rechazó (${fail.reason})`);
+    async save(t, r, f) {
+      const body = {
+        title: f.title, cost: f.cost, prompt: f.prompt, is_enabled: f.enabled, is_user_input_required: f.input,
+        should_redemptions_skip_request_queue: f.skipQueue,
+        is_max_per_stream_enabled: f.maxStream > 0, ...(f.maxStream > 0 ? { max_per_stream: f.maxStream } : {}),
+        is_max_per_user_per_stream_enabled: f.maxUserStream > 0, ...(f.maxUserStream > 0 ? { max_per_user_per_stream: f.maxUserStream } : {}),
+        is_global_cooldown_enabled: f.cooldown > 0, ...(f.cooldown > 0 ? { global_cooldown_seconds: f.cooldown } : {}),
+        ...(f.color ? { background_color: f.color.toUpperCase() } : {}),
+      };
+      const room = await twRoom(t);
+      if (r) await helix('PATCH', 'channel_points/custom_rewards', { broadcaster_id: room, id: r.id }, { ...body, is_paused: f.paused });
+      else await helix('POST', 'channel_points/custom_rewards', { broadcaster_id: room }, body);
     },
-    update: (t, r, changes) => kickApi('PATCH', 'channels/rewards/' + encodeURIComponent(r.id), {
+    quick: async (t, r, changes) => helix('PATCH', 'channel_points/custom_rewards', { broadcaster_id: await twRoom(t), id: r.id }, {
       ...(changes.enabled !== undefined ? { is_enabled: changes.enabled } : {}),
       ...(changes.paused !== undefined ? { is_paused: changes.paused } : {}),
-      ...(changes.cost !== undefined ? { cost: changes.cost } : {}),
+    }),
+    remove: async (t, r) => helix('DELETE', 'channel_points/custom_rewards', { broadcaster_id: await twRoom(t), id: r.id }),
+    maxTitle: 45,
+    fields: ['input', 'paused', 'skipQueue', 'maxStream', 'maxUserStream', 'cooldown'],
+  },
+
+  kick: {
+    async rewards() {
+      // Las solicitudes pendientes dicen qué recompensas puede gestionar esta app
+      const [rw, rd] = await Promise.all([kickApi('GET', 'channels/rewards'), kickApi('GET', 'channels/rewards/redemptions?status=pending').catch(() => ({}))]);
+      const manageIds = new Set();
+      for (const g of rd.data || []) if (g.reward && g.reward.can_manage) manageIds.add(g.reward.id);
+      const created = new Set(store.get('kickRewardsMine', [])); // Kick no lo dice en la lista: lo recordamos al crearlas
+      return (rw.data || []).map((r) => ({
+        id: r.id, title: r.title, cost: r.cost, enabled: r.is_enabled, paused: r.is_paused,
+        input: r.is_user_input_required, prompt: r.description, color: r.background_color,
+        skipQueue: r.should_redemptions_skip_request_queue, manage: created.has(r.id) || manageIds.has(r.id) || !!r.can_manage,
+      }));
+    },
+    async redemptions(t, rewards, status) {
+      const map = { pending: 'pending', done: 'accepted', refunded: 'rejected' };
+      const wanted = status === 'all' ? Object.keys(map) : [status];
+      const manage = new Set(rewards.filter((r) => r.manage).map((r) => r.id));
+      const out = [];
+      await Promise.all(wanted.map(async (st) => {
+        const j = await kickApi('GET', 'channels/rewards/redemptions?status=' + map[st]);
+        for (const g of j.data || []) {
+          if (!g.reward || !(manage.has(g.reward.id) || g.reward.can_manage)) continue;
+          for (const x of g.redemptions || []) {
+            out.push({ id: x.id, rewardId: g.reward.id, rewardTitle: g.reward.title, cost: g.reward.cost, userId: x.redeemer && x.redeemer.user_id, input: x.user_input, at: x.redeemed_at, status: st });
+          }
+        }
+      }));
+      await kickNames(out);
+      return out;
+    },
+    async setRedemptions(t, list, ok) {
+      const ids = list.map((x) => x.id);
+      for (let i = 0; i < ids.length; i += 25) {
+        const j = await kickApi('POST', `channels/rewards/redemptions/${ok ? 'accept' : 'reject'}`, { ids: ids.slice(i, i + 25) });
+        const fail = j && j.data && j.data[0];
+        if (fail) throw new Error(`Kick rechazó ${j.data.length} (${fail.reason})`);
+      }
+    },
+    async save(t, r, f) {
+      const body = {
+        title: f.title, cost: f.cost, description: f.prompt || '', is_enabled: f.enabled, is_user_input_required: f.input,
+        should_redemptions_skip_request_queue: f.skipQueue, ...(f.color ? { background_color: f.color } : {}),
+      };
+      if (r) await kickApi('PATCH', 'channels/rewards/' + encodeURIComponent(r.id), { ...body, is_paused: f.paused });
+      else {
+        const j = await kickApi('POST', 'channels/rewards', body);
+        if (j && j.data && j.data.id) store.set('kickRewardsMine', [...store.get('kickRewardsMine', []), j.data.id]);
+      }
+    },
+    quick: (t, r, changes) => kickApi('PATCH', 'channels/rewards/' + encodeURIComponent(r.id), {
+      ...(changes.enabled !== undefined ? { is_enabled: changes.enabled } : {}),
+      ...(changes.paused !== undefined ? { is_paused: changes.paused } : {}),
     }),
     remove: (t, r) => kickApi('DELETE', 'channels/rewards/' + encodeURIComponent(r.id)),
-    async create(t, f) {
-      const j = await kickApi('POST', 'channels/rewards', {
-        title: f.title.slice(0, 50), cost: f.cost, description: f.prompt || undefined,
-        is_user_input_required: f.input, ...(f.color ? { background_color: f.color } : {}),
-      });
-      if (j.data && j.data.id) store.set('kickRewardsMine', [...store.get('kickRewardsMine', []), j.data.id]);
-    },
-    canPause: true,
+    maxTitle: 50,
+    fields: ['input', 'paused', 'skipQueue'],
   },
+
   starvios: {
-    async list() {
-      const me = svAuth.userId;
-      const [rewards, reds] = await Promise.all([
-        svGet(`channel_rewards?select=*&channel_id=eq.${me}&order=sort,cost`),
-        svGet(`channel_reward_redemptions?select=id,reward_title,cost,input,status,created_at,user_id&channel_id=eq.${me}&order=created_at.desc&limit=30`),
-      ]);
-      const ids = [...new Set(reds.map((x) => x.user_id))];
+    async rewards() {
+      const rows = await svGet(`channel_rewards?select=*&channel_id=eq.${svAuth.userId}&order=sort,cost`);
+      return rows.map((r) => ({
+        id: r.id, title: r.title, cost: r.cost, enabled: r.enabled, prompt: r.description, color: r.color, kind: r.kind, emoji: r.emoji,
+        input: false, maxChars: r.max_chars || 150, manage: true, // en Starvios el texto siempre es opcional (10–200 letras)
+        cooldown: r.cooldown_seconds || 0, userCooldown: r.user_cooldown_seconds || 0,
+        maxStream: r.max_per_stream || 0, maxUserStream: r.max_per_user_per_stream || 0, maxUserTotal: r.max_per_user_total || 0,
+        subsOnly: !!r.subs_only,
+      }));
+    },
+    async redemptions(t, rewards, status) {
+      const reds = await svAuthed('GET', `channel_reward_redemptions?select=id,reward_title,cost,input,status,created_at,user_id&channel_id=eq.${svAuth.userId}&order=created_at.desc&limit=60`);
+      const ids = [...new Set((reds || []).map((x) => x.user_id))];
       const names = {};
       if (ids.length) {
         for (const p of await svGet(`profiles?select=id,username,display_name&id=in.(${ids.join(',')})`)) names[p.id] = p.display_name || p.username;
       }
-      return {
-        rewards: rewards.map((r) => ({ id: r.id, title: r.title, cost: r.cost, enabled: r.enabled, input: (r.max_chars || 0) > 0, prompt: r.description, kind: r.kind, manage: true })),
-        // Starvios no tiene cola de "pendientes": se listan los últimos y se pueden devolver
-        pending: reds.filter((x) => !/refund/i.test(x.status || '')).map((x) => ({
-          id: x.id, reward: { title: x.reward_title, manage: true }, user: names[x.user_id] || 'alguien', input: x.input, at: x.created_at, status: x.status,
-        })),
+      // Starvios aplica el canje al momento ("done"); lo único que queda es devolverlo
+      return (reds || []).map((x) => ({
+        id: x.id, rewardTitle: x.reward_title, cost: x.cost, user: names[x.user_id] || 'alguien', input: x.input, at: x.created_at,
+        status: x.status === 'done' ? 'done' : x.status === 'pending' ? 'pending' : 'refunded',
+      })).filter((x) => status === 'all' || x.status === status);
+    },
+    async setRedemptions(t, list, ok) {
+      if (ok) return; // ya están aplicados
+      for (const x of list) await svAuthed('POST', 'rpc/refund_channel_redemption', { _id: x.id });
+    },
+    async save(t, r, f) {
+      const body = {
+        title: f.title, description: f.prompt || '', cost: f.cost, enabled: f.enabled, ...(f.color ? { color: f.color } : {}),
+        max_chars: Math.min(200, Math.max(10, f.maxChars || 150)),
+        cooldown_seconds: f.cooldown, user_cooldown_seconds: f.userCooldown,
+        max_per_stream: f.maxStream || null, max_per_user_per_stream: f.maxUserStream || null, max_per_user_total: f.maxUserTotal || null,
+        subs_only: f.subsOnly,
       };
+      const rows = r
+        ? await svAuthed('PATCH', `channel_rewards?id=eq.${encodeURIComponent(r.id)}&select=id`, body, { Prefer: 'return=representation' })
+        : await svAuthed('POST', 'channel_rewards?select=id', { ...body, channel_id: svAuth.userId, kind: 'custom', emoji: '🎁' }, { Prefer: 'return=representation' });
+      if (!rows || !rows.length) throw new Error('Starvios no aceptó el cambio');
     },
-    async setRedemption(t, x, ok) {
-      if (ok) return; // en Starvios el canje ya se aplicó; solo existe "devolver"
-      await svAuthed('POST', 'rpc/refund_channel_redemption', { _id: x.id });
-    },
-    async update(t, r, changes) {
-      const body = {};
-      if (changes.enabled !== undefined) body.enabled = changes.enabled;
-      if (changes.cost !== undefined) body.cost = changes.cost;
-      const rows = await svAuthed('PATCH', `channel_rewards?id=eq.${encodeURIComponent(r.id)}&select=id`, body, { Prefer: 'return=representation' });
+    async quick(t, r, changes) {
+      const rows = await svAuthed('PATCH', `channel_rewards?id=eq.${encodeURIComponent(r.id)}&select=id`, { enabled: changes.enabled }, { Prefer: 'return=representation' });
       if (!rows || !rows.length) throw new Error('Starvios no aceptó el cambio');
     },
     async remove(t, r) {
       const rows = await svAuthed('DELETE', `channel_rewards?id=eq.${encodeURIComponent(r.id)}&select=id`, null, { Prefer: 'return=representation' });
       if (!rows || !rows.length) throw new Error('Starvios no borró la recompensa');
     },
-    async create(t, f) {
-      const rows = await svAuthed('POST', 'channel_rewards?select=id', {
-        channel_id: svAuth.userId, title: f.title.slice(0, 50), kind: 'custom', description: f.prompt || null,
-        cost: f.cost, enabled: true, max_chars: f.input ? 200 : 0, ...(f.color ? { color: f.color } : {}),
-      }, { Prefer: 'return=representation' });
-      if (!rows || !rows.length) throw new Error('Starvios no creó la recompensa');
-    },
-    canPause: false,
+    maxTitle: 45,
+    fields: ['maxChars', 'subsOnly', 'maxStream', 'maxUserStream', 'maxUserTotal', 'cooldown', 'userCooldown'],
   },
 };
 
-/* ---------- 🎁 Canjear como espectador (solo Starvios) ----------
- * Twitch y Kick no tienen en su API una forma de canjear puntos.
- * Starvios sí: redeem_channel_reward, con tu saldo de puntos del canal.
- */
-let rdChannel = null;
-
-function redeemSection() {
-  const sec = el('section', 'tl-live-card starvios rd-sec');
-  sec.append(el('h3', null, '🎁 Canjear como espectador'));
-  if (!svAuth) {
-    sec.append(el('p', 'note', 'Inicia sesión con Starvios en ⚙ para canjear recompensas. Twitch y Kick no permiten canjear puntos desde otras apps.'));
-    return sec;
-  }
-  sec.append(el('p', 'note', 'Solo Starvios lo permite; en Twitch y Kick hay que canjear desde su web o su app.'));
-  const chans = [{ name: 'tu canal', id: svAuth.userId }];
-  for (const name of channelsOf('starvios')) {
-    const s = svStreams[name];
-    if (s && s.channelId !== svAuth.userId) chans.push({ name, id: s.channelId });
-  }
-  if (!rdChannel || !chans.some((c) => c.id === rdChannel)) rdChannel = (chans[1] || chans[0]).id;
-  const pick = choiceRow(chans.map((c) => [c.id, c.name]), rdChannel);
-  const list = el('div', 'stack');
-  list.id = 'rd-list';
-  pick.addEventListener('click', () => { if (pick.value !== rdChannel) { rdChannel = pick.value; loadRedeem(); } });
-  sec.append(pick, list);
-  setTimeout(loadRedeem);
-  return sec;
-}
-
-async function loadRedeem() {
-  const list = $('#rd-list');
-  if (!list) return;
-  const ch = rdChannel;
-  list.replaceChildren(el('p', 'note', 'Cargando…'));
-  try {
-    const [status, rewards, state] = await Promise.all([
-      svAuthed('POST', 'rpc/channel_points_status', { _channel: ch }),
-      svGet(`channel_rewards?select=*&enabled=eq.true&channel_id=eq.${ch}&order=sort,cost`),
-      svAuthed('POST', 'rpc/channel_rewards_state', { _channel: ch }),
-    ]);
-    if (ch !== rdChannel || !document.body.contains(list)) return;
-    const st = status || {};
-    const byId = new Map((state || []).map((x) => [x.id, x]));
-    const points = Number(st.points || 0);
-    const rows = [el('p', 'rd-points', `Tus puntos: ${points.toLocaleString('es')}` + (st.is_live === false ? ' · el canal no está en directo' : ''))];
-    if (!rewards.length) rows.push(el('p', 'note', 'Este canal no tiene recompensas activas.'));
-    for (const r of rewards) {
-      const why = redeemBlock(r, byId.get(r.id), st, points);
-      const row = el('div', 'rw-row' + (why ? ' off' : ''));
-      const info = el('div', 'rw-info');
-      info.append(el('strong', null, r.title), el('span', 'rw-cost', ` · ${Number(r.cost).toLocaleString('es')} pts`));
-      if (r.description) info.append(el('div', 'note', r.description));
-      const b = rwButton(why || '🎁 Canjear', 'choice small' + (why ? '' : ' ok'), () => redeem(r));
-      b.disabled = !!why;
-      row.append(info, b);
-      rows.push(row);
-    }
-    list.replaceChildren(...rows);
-  } catch (e) {
-    if (document.body.contains(list)) list.replaceChildren(el('p', 'st-card-error', '⚠ ' + e.message));
-  }
-}
-
-// Mismas reglas que la web de Starvios para saber si se puede canjear ahora
-function redeemBlock(r, s, st, points) {
-  if (st.is_live === false) return 'Solo en directo';
-  if (r.subs_only && !st.is_subscriber) return 'Solo subs';
-  if (s && s.ready_at) {
-    const left = (Date.parse(s.ready_at) - Date.now()) / 1000;
-    if (left > 0) return `En ${fmtClock(left)}`;
-  }
-  if (r.max_per_stream != null && ((s && s.stream_used) || 0) >= r.max_per_stream) return 'Agotada';
-  if (r.max_per_user_per_stream != null && ((s && s.mine_stream) || 0) >= r.max_per_user_per_stream) return 'Límite del directo';
-  if (r.max_per_user_total != null && ((s && s.mine_total) || 0) >= r.max_per_user_total) return 'Límite alcanzado';
-  if (points < r.cost) return 'Faltan puntos';
-  return null;
-}
-
-async function redeem(r) {
-  let input = null;
-  if ((r.max_chars || 0) > 0) {
-    input = prompt(`${r.title}\n${r.description || 'Escribe tu mensaje'} (máx. ${r.max_chars})`, '');
-    if (input === null) return;
-    input = input.trim().slice(0, r.max_chars) || null;
-  } else if (!confirm(`¿Canjear "${r.title}" por ${Number(r.cost).toLocaleString('es')} puntos?`)) {
-    return;
-  }
-  try {
-    await svAuthed('POST', 'rpc/redeem_channel_reward', { _reward: r.id, _input: input });
-    toast(`¡Canjeado: ${r.title}!`);
-  } catch (e) {
-    toast(e.message, true);
-  }
-  loadRedeem();
-}
-
-// Dibuja (o actualiza) una sección por canal, sin tocar el formulario de "Nueva recompensa"
-async function loadRewards() {
-  const box = $('#tl-rw');
-  if (!box) return;
-  const targets = chosen('rewards');
-  if (!targets.length) { box.replaceChildren(el('p', 'note', 'Marca tu canal arriba para ver sus recompensas.')); return; }
-  for (const t of targets) {
-    let sec = box.querySelector(`.rw-sec[data-id="${CSS.escape(t.id)}"]`);
-    if (!sec) {
-      sec = el('section', `tl-live-card ${t.p} rw-sec`);
-      sec.dataset.id = t.id;
-      const head = el('div', 'st-card-head');
-      head.append(el('span', `badge-platform ${t.p}`, PLATFORM_NAMES[t.p]), el('span', 'st-card-name', t.ch));
-      const data = el('div', 'stack rw-data');
-      data.append(el('p', 'note', 'Cargando…'));
-      sec.append(head, data, newRewardForm(t));
-      box.append(sec);
-    }
-    const data = sec.querySelector('.rw-data');
+// Kick solo da el id de quien canjeó: busca los nombres (y los recuerda)
+const kickNameCache = new Map();
+async function kickNames(list) {
+  const missing = [...new Set(list.map((x) => x.userId).filter((id) => id && !kickNameCache.has(id)))];
+  for (let i = 0; i < missing.length; i += 50) {
     try {
-      const { rewards, pending } = await RW[t.p].list(t);
-      if (!document.body.contains(data)) return;
-      data.replaceChildren(pendingList(t, pending), rewardList(t, rewards));
+      const j = await kickApi('GET', 'users?' + missing.slice(i, i + 50).map((id) => 'id=' + id).join('&'));
+      for (const u of j.data || []) kickNameCache.set(u.user_id, u.name);
+    } catch { /* sin permiso: se muestra el número */ }
+  }
+  for (const x of list) x.user = kickNameCache.get(x.userId) || (x.userId ? '#' + x.userId : 'alguien');
+}
+
+/* ---------- Carga y dibujo ---------- */
+async function loadRewards() {
+  if (!$('#rw-list')) return;
+  const seq = ++RWS.seq;
+  const view = RWS.view;
+  const status = RWS.status;
+  await Promise.all(rwTargets().map(async (t) => {
+    const api = RW[t.p];
+    try {
+      const rewards = await api.rewards(t);
+      const reds = view === 'requests' ? await api.redemptions(t, rewards, status) : null;
+      RWS.data[t.id] = { rewards, reds, error: null };
     } catch (e) {
-      if (document.body.contains(data)) data.replaceChildren(el('p', 'st-card-error', '⚠ ' + e.message));
+      RWS.data[t.id] = { rewards: [], reds: [], error: e.message };
     }
-  }
-  for (const s of box.querySelectorAll('.rw-sec')) if (!targets.some((t) => t.id === s.dataset.id)) s.remove();
-  for (const n of box.querySelectorAll(':scope > .note')) n.remove();
+  }));
+  if (seq === RWS.seq) drawRewards();
 }
 
-function pendingList(t, pending) {
-  const wrap = el('div', 'stack');
-  wrap.append(el('h4', null, t.p === 'starvios' ? `Canjes recientes (${pending.length})` : `Canjes pendientes (${pending.length})`));
-  if (!pending.length) { wrap.append(el('p', 'note', 'No hay canjes por revisar.')); return wrap; }
-  for (const x of pending) {
-    const row = el('div', 'rw-row');
+function drawRewards() {
+  const list = $('#rw-list');
+  if (!list) return;
+  const targets = rwTargets();
+  const shown = RWS.ch === 'all' ? targets : targets.filter((t) => t.id === RWS.ch);
+  // Números en los botones de canal
+  for (const b of document.querySelectorAll('#rw-chans button')) {
+    const ids = b.dataset.v === 'all' ? targets.map((t) => t.id) : [b.dataset.v];
+    const n = ids.reduce((a, id) => {
+      const d = RWS.data[id];
+      if (!d) return a;
+      return a + (RWS.view === 'requests' ? (d.reds || []).filter((x) => x.status === 'pending').length : d.rewards.length);
+    }, 0);
+    b.querySelector('.pill-count').textContent = n ? String(n) : '';
+  }
+  // No vuelve a dibujar si nada cambió (para no saltar mientras lees)
+  const sig = JSON.stringify([RWS.view, RWS.ch, RWS.status, shown.map((t) => RWS.data[t.id])]);
+  if (sig === RWS.sig) return;
+  RWS.sig = sig;
+  if (RWS.view === 'requests') drawRequests(list, shown);
+  else drawRewardList(list, shown);
+}
+
+function drawRequests(list, shown) {
+  const rows = [];
+  const errors = [];
+  for (const t of shown) {
+    const d = RWS.data[t.id];
+    if (!d) continue;
+    if (d.error) errors.push(el('p', 'st-card-error', `⚠ ${tName(t)}: ${d.error}`));
+    for (const x of d.reds || []) rows.push({ t, x });
+  }
+  rows.sort((a, b) => Date.parse(b.x.at) - Date.parse(a.x.at));
+
+  // Acciones para todos los que están por revisar
+  const bulk = $('#rw-bulk');
+  const pending = rows.filter((r) => r.x.status === 'pending');
+  const canComplete = pending.filter((r) => r.t.p !== 'starvios');
+  bulk.replaceChildren();
+  if (canComplete.length > 1) bulk.append(rwButton(`✓ Completar todos (${canComplete.length})`, 'choice small ok', () => rwBulk(canComplete, true)));
+  if (pending.length > 1) bulk.append(rwButton(`↩ Devolver todos (${pending.length})`, 'choice small danger', () => rwBulk(pending, false)));
+
+  const nodes = [...errors];
+  if (!rows.length) nodes.push(el('p', 'empty', RWS.status === 'pending' ? 'No hay canjes por revisar. 🎉' : 'No hay canjes para mostrar.'));
+  for (const { t, x } of rows.slice(0, 200)) {
+    const row = el('div', `rw-req ${t.p} ${x.status}`);
     const info = el('div', 'rw-info');
-    info.append(el('strong', null, x.user), el('span', null, ` canjeó "${x.reward.title}"`));
+    const head = el('div', 'rw-req-head');
+    if (RWS.ch === 'all') head.append(el('span', `badge-platform ${t.p}`, t.ch));
+    head.append(el('strong', null, x.user), el('span', 'tag', RW_STATUS_TAG[x.status]));
+    info.append(head, el('div', null, `🏆 ${x.rewardTitle}` + (x.cost ? ` · ${nfp(x.cost)} pts` : '')));
     if (x.input) info.append(el('div', 'rw-input', '💬 ' + x.input));
-    info.append(el('div', 'note', fmtTime(new Date(x.at)) + (x.status ? ` · ${x.status}` : '')));
+    info.append(el('div', 'note', x.at ? new Date(x.at).toLocaleString('es', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''));
     const acts = el('div', 'rw-acts');
-    if (t.p !== 'starvios') acts.append(rwButton('✓ Completar', 'choice small ok', () => redemption(t, x, true)));
-    acts.append(rwButton('↩ Devolver puntos', 'choice small', () => {
-      if (confirm(`¿Devolver los puntos a ${x.user} por "${x.reward.title}"?`)) redemption(t, x, false);
-    }));
-    row.append(info, acts);
-    wrap.append(row);
-  }
-  return wrap;
-}
-
-function rewardList(t, rewards) {
-  const wrap = el('div', 'stack');
-  wrap.append(el('h4', null, `Recompensas (${rewards.length})`));
-  if (!rewards.length) { wrap.append(el('p', 'note', 'Este canal no tiene recompensas.')); return wrap; }
-  const api = RW[t.p];
-  for (const r of rewards) {
-    const row = el('div', 'rw-row' + (r.enabled ? '' : ' off'));
-    const info = el('div', 'rw-info');
-    const title = el('strong', null, r.title);
-    if (r.color) title.style.borderLeft = `4px solid ${r.color}`;
-    info.append(title, el('span', 'rw-cost', ` · ${Number(r.cost).toLocaleString('es')} pts`));
-    const tags = el('div', 'st-card-tags');
-    tags.append(el('span', 'tag' + (r.enabled ? ' on' : ''), r.enabled ? 'Activa' : 'Desactivada'));
-    if (r.paused) tags.append(el('span', 'tag', '⏸ Pausada'));
-    if (r.input) tags.append(el('span', 'tag', '💬 Pide texto'));
-    if (r.manage && t.p !== 'starvios') tags.append(el('span', 'tag on', 'Chat M'));
-    info.append(tags);
-    const acts = el('div', 'rw-acts');
-    if (r.manage) {
-      acts.append(rwButton(r.enabled ? 'Desactivar' : 'Activar', 'choice small', () => rewardChange(t, r, { enabled: !r.enabled })));
-      if (api.canPause) acts.append(rwButton(r.paused ? '▶ Reanudar' : '⏸ Pausar', 'choice small', () => rewardChange(t, r, { paused: !r.paused })));
-      acts.append(rwButton('✎ Costo', 'choice small', () => {
-        const v = Math.floor(Number(prompt(`Nuevo costo para "${r.title}"`, r.cost)));
-        if (v >= 1) rewardChange(t, r, { cost: v });
-      }));
-      acts.append(rwButton('🗑', 'choice small danger', () => {
-        if (confirm(`¿Borrar la recompensa "${r.title}"?`)) rwDo(t, 'Recompensa borrada', () => api.remove(t, r));
-      }));
-    } else {
-      acts.append(rwButton('⧉ Duplicar en Chat M', 'choice small', () => {
-        const title = prompt('Nombre de la copia (debe ser distinto al original):', r.title + ' ★');
-        if (title) rwDo(t, 'Copia creada: desactiva la original en la web de ' + PLATFORM_NAMES[t.p],
-          () => api.create(t, { title, cost: r.cost, prompt: r.prompt, input: r.input, color: r.color }));
+    if (x.status === 'pending' && t.p !== 'starvios') acts.append(rwButton('✓ Completar', 'choice small ok', () => rwBulk([{ t, x }], true, true)));
+    if (x.status === 'pending' || (x.status === 'done' && t.p === 'starvios')) {
+      acts.append(rwButton('↩ Devolver puntos', 'choice small', () => {
+        if (confirm(`¿Devolver ${x.cost ? nfp(x.cost) + ' puntos' : 'los puntos'} a ${x.user} por "${x.rewardTitle}"?`)) rwBulk([{ t, x }], false, true);
       }));
     }
     row.append(info, acts);
-    wrap.append(row);
+    nodes.push(row);
   }
-  return wrap;
+  list.replaceChildren(...nodes);
 }
 
-function newRewardForm(t) {
-  const d = el('details', 'rw-new');
-  d.append(el('summary', null, '＋ Nueva recompensa'));
-  const title = textInput(45, 'Ej.: Elige la próxima rutina');
-  const cost = el('input');
-  cost.type = 'number';
-  cost.min = '1';
-  cost.value = '500';
-  cost.inputMode = 'numeric';
+function drawRewardList(list, shown) {
+  $('#rw-bulk').replaceChildren();
+  const nodes = [];
+  for (const t of shown) {
+    const d = RWS.data[t.id];
+    const sec = el('section', `tl-live-card ${t.p} rw-sec`);
+    const head = el('div', 'st-card-head');
+    head.append(el('span', `badge-platform ${t.p}`, PLATFORM_NAMES[t.p]), el('span', 'st-card-name', t.ch),
+      rwButton('＋ Nueva', 'choice small ok', () => rewardEditor(t, null)));
+    sec.append(head);
+    if (!d) sec.append(el('p', 'note', 'Cargando…'));
+    else if (d.error) sec.append(el('p', 'st-card-error', '⚠ ' + d.error));
+    else if (!d.rewards.length) sec.append(el('p', 'note', 'Este canal no tiene recompensas.'));
+    else for (const r of d.rewards) sec.append(rewardRow(t, r));
+    nodes.push(sec);
+  }
+  list.replaceChildren(...nodes);
+}
+
+function rewardRow(t, r) {
+  const api = RW[t.p];
+  const row = el('div', 'rw-row' + (r.enabled ? '' : ' off'));
+  const info = el('div', 'rw-info');
+  const title = el('strong', null, (r.emoji ? r.emoji + ' ' : '') + r.title);
+  if (r.color) title.style.borderLeft = `4px solid ${r.color}`;
+  info.append(title, el('span', 'rw-cost', ` · ${nfp(r.cost)} pts`));
+  if (r.prompt) info.append(el('div', 'note', r.prompt));
+  const tags = el('div', 'st-card-tags');
+  tags.append(el('span', 'tag' + (r.enabled ? ' on' : ''), r.enabled ? 'Activa' : 'Desactivada'));
+  if (r.paused) tags.append(el('span', 'tag', '⏸ Pausada'));
+  if (r.input) tags.append(el('span', 'tag', '💬 Pide texto'));
+  if (r.skipQueue) tags.append(el('span', 'tag', '⚡ Automática'));
+  if (r.subsOnly) tags.append(el('span', 'tag', '⭐ Solo subs'));
+  if (r.cooldown) tags.append(el('span', 'tag', `⏱ ${fmtClock(r.cooldown)}`));
+  if (r.maxStream) tags.append(el('span', 'tag', `${r.maxStream} por directo`));
+  if (!r.manage) tags.append(el('span', 'tag', '🔒 Solo lectura'));
+  info.append(tags);
+  const acts = el('div', 'rw-acts');
+  if (r.manage) {
+    const sw = el('label', 'toggle');
+    const cb = el('input');
+    cb.type = 'checkbox';
+    cb.checked = !!r.enabled;
+    cb.title = r.enabled ? 'Desactivar' : 'Activar';
+    cb.addEventListener('change', () => rwDo(t, cb.checked ? 'Recompensa activada' : 'Recompensa desactivada', () => api.quick(t, r, { enabled: cb.checked })));
+    sw.append(cb);
+    acts.append(sw);
+    if (api.fields.includes('paused')) acts.append(rwButton(r.paused ? '▶' : '⏸', 'choice small', () => rwDo(t, r.paused ? 'Reanudada' : 'Pausada', () => api.quick(t, r, { paused: !r.paused }))));
+    acts.append(rwButton('✎ Editar', 'choice small', () => rewardEditor(t, r)));
+    acts.append(rwButton('🗑', 'choice small danger', () => {
+      if (confirm(`¿Borrar la recompensa "${r.title}"?`)) rwDo(t, 'Recompensa borrada', () => api.remove(t, r));
+    }));
+  } else {
+    acts.append(rwButton('⧉ Duplicar en Chat M', 'choice small', () => {
+      const name = prompt('Nombre de la copia (debe ser distinto al original):', r.title + ' ★');
+      if (name) rwDo(t, 'Copia creada: desactiva la original en la web de ' + PLATFORM_NAMES[t.p], () => api.save(t, null, { ...r, title: name.slice(0, api.maxTitle) }));
+    }));
+  }
+  row.append(info, acts);
+  return row;
+}
+
+/* ---------- Editor de recompensa (crear o editar todo) ---------- */
+function rewardEditor(t, r) {
+  const api = RW[t.p];
+  const has = (k) => api.fields.includes(k);
+  const dlg = $('#user-card');
+  const sheet = el('div', 'sheet uc rw-editor');
+  const num = (v, min = 0) => { const i = el('input'); i.type = 'number'; i.min = String(min); i.inputMode = 'numeric'; i.value = String(v || 0); return i; };
+  const sw = (label, checked, hint) => {
+    const l = el('label', 'toggle set-switch');
+    const s = el('span', null, label);
+    if (hint) s.append(el('small', null, hint));
+    const i = el('input');
+    i.type = 'checkbox';
+    i.checked = !!checked;
+    l.append(s, i);
+    l.input = i;
+    return l;
+  };
+  const v = r || { title: '', cost: 500, enabled: true, color: '#9146FF', maxChars: 150 };
+  const title = textInput(api.maxTitle, 'Ej.: Elige la próxima rutina');
+  title.value = v.title || '';
+  const cost = num(v.cost, 1);
   const desc = textInput(200, 'Texto que verá quien la canjee (opcional)');
-  const inputLbl = el('label', 'check');
-  const input = el('input');
-  input.type = 'checkbox';
-  inputLbl.append(input, ' Pedir un texto al canjear');
-  const go = bigButton('Crear recompensa', async () => {
-    const f = { title: title.value.trim(), cost: Math.floor(Number(cost.value)), prompt: desc.value.trim(), input: input.checked };
+  desc.value = v.prompt || '';
+  const color = el('input');
+  color.type = 'color';
+  color.value = /^#[0-9a-f]{6}$/i.test(v.color || '') ? v.color : '#9146ff';
+  const enabled = sw('Activa', v.enabled);
+  const parts = [el('h2', null, `${r ? '✎ Editar' : '＋ Nueva'} recompensa · ${PLATFORM_NAMES[t.p]}`),
+    field('Nombre', title, true), field('Costo en puntos', cost), field('Descripción', desc, true), field('Color', color), enabled];
+  const ctl = {};
+  if (has('input')) { ctl.input = sw('Pedir un texto al canjear', v.input); parts.push(ctl.input); }
+  if (has('maxChars')) { ctl.maxChars = num(v.maxChars || 150, 10); parts.push(field('Máximo de letras del texto', ctl.maxChars)); }
+  if (has('paused') && r) { ctl.paused = sw('Pausada', v.paused, 'Se ve pero no se puede canjear'); parts.push(ctl.paused); }
+  if (has('skipQueue')) { ctl.skipQueue = sw('Completar automáticamente', v.skipQueue, 'No pasa por la lista de solicitudes'); parts.push(ctl.skipQueue); }
+  if (has('subsOnly')) { ctl.subsOnly = sw('Solo suscriptores', v.subsOnly); parts.push(ctl.subsOnly); }
+  const limits = el('div', 'rw-limits');
+  if (has('maxStream')) { ctl.maxStream = num(v.maxStream); limits.append(field('Máximo por directo', ctl.maxStream)); }
+  if (has('maxUserStream')) { ctl.maxUserStream = num(v.maxUserStream); limits.append(field('Máximo por persona en el directo', ctl.maxUserStream)); }
+  if (has('maxUserTotal')) { ctl.maxUserTotal = num(v.maxUserTotal); limits.append(field('Máximo por persona (siempre)', ctl.maxUserTotal)); }
+  if (has('cooldown')) { ctl.cooldown = num(Math.round((v.cooldown || 0) / 60)); limits.append(field('Espera entre canjes (min)', ctl.cooldown)); }
+  if (has('userCooldown')) { ctl.userCooldown = num(Math.round((v.userCooldown || 0) / 60)); limits.append(field('Espera por persona (min)', ctl.userCooldown)); }
+  if (limits.childElementCount) parts.push(el('h4', null, 'Límites (0 = sin límite)'), limits);
+
+  const save = bigButton(r ? 'Guardar cambios' : 'Crear recompensa', async () => {
+    const n = (i) => Math.max(0, Math.floor(Number(i && i.value) || 0));
+    const f = {
+      title: title.value.trim().slice(0, api.maxTitle), cost: Math.floor(Number(cost.value)), prompt: desc.value.trim(),
+      color: color.value, enabled: enabled.input.checked,
+      input: ctl.input ? ctl.input.input.checked : false, maxChars: n(ctl.maxChars),
+      paused: ctl.paused ? ctl.paused.input.checked : !!v.paused, skipQueue: ctl.skipQueue ? ctl.skipQueue.input.checked : false,
+      subsOnly: ctl.subsOnly ? ctl.subsOnly.input.checked : false,
+      maxStream: n(ctl.maxStream), maxUserStream: n(ctl.maxUserStream), maxUserTotal: n(ctl.maxUserTotal),
+      cooldown: n(ctl.cooldown) * 60, userCooldown: n(ctl.userCooldown) * 60,
+    };
     if (!f.title || !(f.cost >= 1)) { toast('Escribe el nombre y un costo de al menos 1.', true); return; }
-    if (await rwDo(t, 'Recompensa creada', () => RW[t.p].create(t, f))) { title.value = ''; desc.value = ''; d.open = false; }
+    if (await rwDo(t, r ? 'Recompensa guardada' : 'Recompensa creada', () => api.save(t, r, f))) dlg.close();
   });
-  d.append(field('Nombre', title, true), field('Costo en puntos', cost), field('Descripción', desc, true), inputLbl, go);
-  return d;
+  const cancel = rwButton('Cancelar', 'choice', () => dlg.close());
+  const row = el('div', 'row end');
+  row.append(cancel, save);
+  sheet.append(...parts, row);
+  dlg.replaceChildren(sheet);
+  dlg.showModal();
 }
 
 function rwButton(text, cls, onClick) {
@@ -1065,11 +1182,23 @@ async function rwDo(t, okText, fn) {
     return true;
   } catch (e) {
     toast(`${tName(t)}: ${e.message}`, true);
+    loadRewards();
     return false;
   }
 }
-const redemption = (t, x, ok) => rwDo(t, ok ? 'Canje completado' : 'Puntos devueltos', () => RW[t.p].setRedemption(t, x, ok));
-const rewardChange = (t, r, changes) => rwDo(t, 'Recompensa actualizada', () => RW[t.p].update(t, r, changes));
+
+// Completar (ok) o devolver puntos de varios canjes, agrupados por canal
+async function rwBulk(items, ok, single) {
+  if (!single && !confirm(ok ? `¿Marcar ${items.length} canjes como completados?` : `¿Devolver los puntos de ${items.length} canjes?`)) return;
+  const byT = new Map();
+  for (const { t, x } of items) { if (!byT.has(t.id)) byT.set(t.id, { t, list: [] }); byT.get(t.id).list.push(x); }
+  let fails = 0;
+  for (const { t, list } of byT.values()) {
+    try { await RW[t.p].setRedemptions(t, list, ok); } catch (e) { fails++; toast(`${tName(t)}: ${e.message}`, true); }
+  }
+  if (!fails) toast(ok ? (items.length > 1 ? `${items.length} canjes completados` : 'Canje completado') : (items.length > 1 ? `Puntos devueltos (${items.length})` : 'Puntos devueltos'));
+  loadRewards();
+}
 
 function liveSection(title) {
   const s = el('section', 'stack');

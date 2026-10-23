@@ -6,6 +6,18 @@
 // Al publicar una versión nueva: agrega su entrada arriba (y sube CACHE en sw.js)
 const RELEASES = [
   {
+    v: '2.7', date: '2026-10-22', title: 'Canjes renovados y arreglos del Panel',
+    items: [
+      '🏆 Canjes con dos vistas: 📥 Solicitudes y 🏆 Recompensas, de todos tus canales juntos (🌐 Todos) o de uno solo.',
+      'Solicitudes filtradas por estado (por revisar, completados, devueltos), con botones para completar o devolver puntos de una o de todas.',
+      'Editor completo de recompensas: nombre, costo, descripción, color, pedir texto, pausar, completar automáticamente, límites y tiempos de espera.',
+      'Se quitó "Canjear como espectador" de Starvios.',
+      'Panel: arreglado el error "started_at" del ranking de bits en tu canal.',
+      'Las filas de canales y pestañas ya no regresan al inicio al elegir una opción.',
+      'Las tarjetas del Panel se acomodan sin espacios vacíos.',
+    ],
+  },
+  {
     v: '2.6', date: '2026-10-22', title: 'Ajustes ordenados y Novedades',
     items: [
       'Ajustes en pestañas: Canales, Cuentas, Vista, Avanzado y Novedades.',

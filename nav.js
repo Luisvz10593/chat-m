@@ -57,6 +57,28 @@ function setModBadge(n) {
   b.textContent = n > 99 ? '99+' : String(n);
 }
 
+// Al volver a dibujar una sección, las filas de opciones (canales, pestañas) y la
+// página se quedan donde estaban en vez de regresar al inicio.
+// Uso: const restore = keepScroll(page); …dibujar…; restore();
+function keepScroll(page) {
+  const rows = [...page.querySelectorAll('.pill-tabs')].map((r) => r.scrollLeft);
+  const body = page.querySelector('.st-body');
+  const top = body ? body.scrollTop : 0;
+  return () => {
+    page.querySelectorAll('.pill-tabs').forEach((r, i) => {
+      if (rows[i]) r.scrollLeft = rows[i];
+      // Si el elegido quedó fuera de la vista, lo acerca sin mover lo demás
+      const sel = r.querySelector('[aria-selected="true"]');
+      if (!sel) return;
+      const rr = r.getBoundingClientRect();
+      const sr = sel.getBoundingClientRect();
+      if (sr.left < rr.left || sr.right > rr.right) r.scrollLeft += sr.left - rr.left - (rr.width - sr.width) / 2;
+    });
+    const nb = page.querySelector('.st-body');
+    if (nb && top) nb.scrollTop = top;
+  };
+}
+
 // Encabezado común de las secciones nuevas
 function pageHeader(icon, title, subtitle) {
   const h = el('header', 'st-head');

@@ -73,8 +73,8 @@ chat queda siempre visible y la sección se abre a su lado.
   | 📢 Shoutout | Donde eres mod | ✗ | ✗ |
   | 🎬 Clips | ✓ | ✗ | ✗ |
   | 📌 Fijar mensaje (menú del mensaje) | Donde eres mod | ✗ | ✓ |
-  | 🏆 Canjes: pendientes, completar, devolver puntos | Recompensas creadas en Chat M | Recompensas creadas en Chat M | ✓ |
-  | 🏆 Recompensas: crear, activar, pausar, costo, borrar | Creadas en Chat M | Creadas en Chat M | ✓ |
+  | 🏆 Solicitudes de canje (todas juntas o por canal): completar, devolver puntos, en grupo | Recompensas creadas en Chat M | Recompensas creadas en Chat M | Devolver puntos |
+  | 🏆 Recompensas: crear, editar todo, activar, pausar, borrar | Creadas en Chat M | Creadas en Chat M | ✓ |
 
   Twitch y Kick solo dejan gestionar las recompensas creadas desde la misma app.
   Para las que creaste en su web, usa "Duplicar en Chat M" y desactiva la original.
@@ -84,8 +84,6 @@ chat queda siempre visible y la sección se abre a su lado.
   las plataformas, y los emotes del canal elegido: Twitch (todos los que puedes usar),
   Kick (canal, globales y emojis de Kick) y Starvios (`:codigo:`). Los emotes de
   Starvios también se ven como imagen en el chat.
-- **🎁 Canjear como espectador** (🧰 → 🏆 Canjes): solo Starvios lo permite; muestra
-  tus puntos y qué puedes canjear. Twitch y Kick no dejan canjear desde otras apps.
 - **🛡 AutoMod (Twitch):** los mensajes retenidos para revisión aparecen en el chat
   con botones **Permitir / Rechazar** (en tu canal y donde seas moderador).
 

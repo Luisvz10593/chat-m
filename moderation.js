@@ -83,6 +83,7 @@ const MOD_TABS = {
 /* ---------- Dibujo de la sección ---------- */
 function renderMod() {
   const page = $('#page-mod');
+  const restore = keepScroll(page);
   const body = el('div', 'st-body');
   page.replaceChildren(pageHeader('🛡', 'Moderación', 'Revisa y controla lo que pasa en tus canales'), body);
   const targets = modTargets();
@@ -125,6 +126,7 @@ function renderMod() {
   const content = el('div', 'stack');
   content.id = 'mod-content';
   body.append(tabRow, content);
+  restore();
   loadModTab(t, MOD.tab, content);
 }
 

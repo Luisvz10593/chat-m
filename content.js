@@ -20,6 +20,7 @@ const CT_OWN_ONLY = new Set(['vods', 'schedule', 'commands', 'emotes', 'dms', 'n
 
 function renderContent() {
   const page = $('#page-content');
+  const restore = keepScroll(page);
   const body = el('div', 'st-body');
   page.replaceChildren(pageHeader('🎞', 'Contenido', 'Clips, VODs, calendario y herramientas de tu canal'), body);
   const targets = modTargets();
@@ -52,6 +53,7 @@ function renderContent() {
   const box = el('div', 'stack');
   box.id = 'ct-content';
   body.append(chans, tabRow, box);
+  restore();
   if (CT_OWN_ONLY.has(CT.tab) && !t.own) { box.append(el('p', 'empty', 'Esto solo está disponible en tu propio canal.')); return; }
   (async () => {
     const seq = ++CT.seq;
@@ -100,8 +102,8 @@ const CT_LOADERS = {
   /* ---------- Twitch ---------- */
   async clips(t) {
     const room = await twRoom(t);
-    const since = new Date(Date.now() - 30 * 86400e3).toISOString();
-    const j = await helix('GET', 'clips', { broadcaster_id: room, first: 30, started_at: since });
+    const rfc = (ms) => new Date(ms).toISOString().replace(/\.\d+Z$/, 'Z'); // Twitch no acepta milisegundos
+    const j = await helix('GET', 'clips', { broadcaster_id: room, first: 30, started_at: rfc(Date.now() - 30 * 86400e3), ended_at: rfc(Date.now()) });
     const items = (j.data || []).map((c) => mediaItem({
       thumb: c.thumbnail_url, title: c.title, href: c.url,
       meta: `👁 ${nf(c.view_count)} · ✂ ${c.creator_name} · ${ago(c.created_at)} · ${dur(c.duration)}`,
