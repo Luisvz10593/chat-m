@@ -22,6 +22,9 @@ chat queda siempre visible y la sección se abre a su lado.
 - **🎞 Contenido:** clips, VODs, marcadores, calendario, canales que sigues en vivo;
   en Starvios también comandos, emotes, mensajes privados, notificaciones, alertas
   de OBS y ajustes del directo.
+- **⚙ Ajustes:** pestañas Canales, Cuentas (estado de cada sesión), Vista (letra, opciones y
+  guía de colores), Avanzado (ID de Kick, limpiar chat, buscar actualización) y
+  **📝 Novedades** con las notas de cada versión; el ⚙ muestra un número cuando hay novedades.
 
 ## Detalle
 

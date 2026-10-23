@@ -198,7 +198,6 @@ async function renderColorRow() {
   });
   row.replaceChildren(...swatches, custom);
 }
-$('#btn-settings').addEventListener('click', () => setTimeout(renderColorRow));
 
 /* ---------- Canales de Twitch donde eres moderador ---------- */
 $('#add-mod-channels').addEventListener('click', async () => {

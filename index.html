@@ -25,7 +25,7 @@
     <button type="button" data-page="stream" id="btn-stream"><span class="ri">🎬</span><small>Directo</small></button>
     <button type="button" data-page="content"><span class="ri">🎞</span><small>Contenido</small></button>
     <div class="rail-spacer"></div>
-    <button type="button" id="btn-settings"><span class="ri">⚙</span><small>Ajustes</small></button>
+    <button type="button" id="btn-settings"><span class="ri">⚙</span><small>Ajustes</small><span class="rail-badge" id="settings-badge" hidden></span></button>
   </nav>
 
   <div class="workspace" id="workspace" data-page="chat">
@@ -205,93 +205,153 @@
   <!-- Tarjeta de usuario (moderation.js) -->
   <dialog id="user-card"></dialog>
 
-  <!-- Ajustes -->
-  <dialog id="settings">
-    <form class="sheet" id="settings-form" method="dialog">
-      <h2>⚙ Ajustes</h2>
-
-      <p class="note">Puedes poner varios canales por plataforma, separados por coma.</p>
-      <label>Canales de Twitch
-        <input name="twitchChannel" placeholder="tu_canal, otro_canal" autocapitalize="off" spellcheck="false">
-      </label>
-      <button type="button" id="add-mod-channels" class="link-btn">＋ Agregar los canales de Twitch donde soy moderador</button>
-      <label>Canales de Kick
-        <input name="kickChannel" placeholder="tu_canal, otro_canal" autocapitalize="off" spellcheck="false">
-      </label>
-      <label>Canales de Starvios
-        <input name="starviosChannel" placeholder="tu_canal, otro_canal" autocapitalize="off" spellcheck="false">
-      </label>
-
-      <p class="note">Para escribir y moderar inicia sesión abajo. Las claves y sesiones se guardan
-        <b>solo en este dispositivo</b>.<br>
-        URL de redirección para tus apps de Twitch y Kick: <code id="redirect-url"></code></p>
-
-      <fieldset>
-        <legend>Cuenta de Twitch</legend>
-        <label>Client ID de tu app de Twitch
-          <input name="twitchClientId" placeholder="abc123…" autocapitalize="off" spellcheck="false">
-        </label>
-        <div class="row">
-          <span id="twitch-auth-status" class="note">Sin sesión</span>
-          <button type="button" id="twitch-login">Iniciar sesión</button>
-          <button type="button" id="twitch-logout" hidden>Cerrar sesión</button>
+  <!-- Ajustes (pestañas: settings.js) -->
+  <dialog id="settings" class="settings-dialog">
+    <form class="sheet settings" id="settings-form" method="dialog">
+      <header class="set-head">
+        <div class="set-title">
+          <h2>⚙ Ajustes</h2>
+          <span class="set-version" id="app-version"></span>
         </div>
-      </fieldset>
+        <nav class="pill-tabs set-tabs" role="tablist">
+          <button type="button" role="tab" data-stab="channels"><span class="st-ic">📺</span>Canales</button>
+          <button type="button" role="tab" data-stab="accounts"><span class="st-ic">👤</span>Cuentas<i class="tab-dot warn" id="acct-dot" hidden></i></button>
+          <button type="button" role="tab" data-stab="view"><span class="st-ic">🎨</span>Vista</button>
+          <button type="button" role="tab" data-stab="advanced"><span class="st-ic">🔧</span>Avanzado</button>
+          <button type="button" role="tab" data-stab="news"><span class="st-ic">📝</span>Novedades<i class="tab-dot" id="news-dot" hidden></i></button>
+        </nav>
+      </header>
 
-      <fieldset>
-        <legend>Cuenta de Kick</legend>
-        <label>Client ID de tu app de Kick
-          <input name="kickClientId" autocapitalize="off" spellcheck="false">
-        </label>
-        <label>Client Secret de tu app de Kick
-          <input name="kickClientSecret" type="password" autocomplete="off" autocapitalize="off" spellcheck="false">
-        </label>
-        <div class="row">
-          <span id="kick-auth-status" class="note">Sin sesión</span>
-          <button type="button" id="kick-login">Iniciar sesión</button>
-          <button type="button" id="kick-logout" hidden>Cerrar sesión</button>
-        </div>
-      </fieldset>
+      <div class="set-body">
+        <!-- ===== Canales ===== -->
+        <section data-spanel="channels" class="set-panel">
+          <p class="note">Los canales que quieres ver. Puedes poner varios por plataforma, separados por coma.
+            Para leer el chat no hace falta iniciar sesión.</p>
+          <div class="set-card">
+            <div class="set-card-head"><span class="plat-dot twitch"></span><b>Twitch</b></div>
+            <input name="twitchChannel" placeholder="tu_canal, otro_canal" autocapitalize="off" spellcheck="false" aria-label="Canales de Twitch">
+            <button type="button" id="add-mod-channels" class="link-btn">＋ Agregar los canales donde soy moderador</button>
+          </div>
+          <div class="set-card">
+            <div class="set-card-head"><span class="plat-dot kick"></span><b>Kick</b></div>
+            <input name="kickChannel" placeholder="tu_canal, otro_canal" autocapitalize="off" spellcheck="false" aria-label="Canales de Kick">
+          </div>
+          <div class="set-card">
+            <div class="set-card-head"><span class="plat-dot starvios"></span><b>Starvios</b></div>
+            <input name="starviosChannel" placeholder="tu_canal, otro_canal" autocapitalize="off" spellcheck="false" aria-label="Canales de Starvios">
+          </div>
+        </section>
 
-      <fieldset>
-        <legend>Cuenta de Starvios</legend>
-        <div id="sv-credentials" class="stack">
-          <label>Correo <input id="sv-email" type="email" autocomplete="username" autocapitalize="off" spellcheck="false"></label>
-          <label>Contraseña <input id="sv-pass" type="password" autocomplete="current-password"></label>
-          <p class="note">La contraseña solo se envía a Starvios y no se guarda.</p>
-        </div>
-        <div class="row">
-          <span id="starvios-auth-status" class="note">Sin sesión</span>
-          <button type="button" id="starvios-login">Iniciar sesión</button>
-          <button type="button" id="starvios-logout" hidden>Cerrar sesión</button>
-        </div>
-      </fieldset>
+        <!-- ===== Cuentas ===== -->
+        <section data-spanel="accounts" class="set-panel">
+          <p class="note">Inicia sesión para escribir y moderar. Las claves y sesiones se guardan
+            <b>solo en este dispositivo</b>.</p>
 
-      <fieldset>
-        <legend>Tu nombre en el chat de Twitch</legend>
-        <div class="row" id="color-row"></div>
-      </fieldset>
+          <div class="set-card acct" id="acct-twitch">
+            <div class="set-card-head"><span class="plat-dot twitch"></span><b>Twitch</b><span class="acct-state"></span></div>
+            <span id="twitch-auth-status" class="note">Sin sesión</span>
+            <label>Client ID de tu app de Twitch
+              <input name="twitchClientId" placeholder="abc123…" autocapitalize="off" spellcheck="false">
+            </label>
+            <div class="row">
+              <button type="button" id="twitch-login" class="primary">Iniciar sesión</button>
+              <button type="button" id="twitch-logout" hidden>Cerrar sesión</button>
+            </div>
+            <div class="acct-extra">
+              <h4>Color de tu nombre en el chat</h4>
+              <div class="row" id="color-row"></div>
+            </div>
+          </div>
 
-      <label>Tamaño de letra
-        <input type="range" name="fontSize" min="14" max="30" step="1">
-      </label>
-      <label class="check"><input type="checkbox" name="showTime"> Mostrar hora</label>
-      <label class="check"><input type="checkbox" name="wakeLock"> Mantener la pantalla encendida</label>
-      <label class="check"><input type="checkbox" name="showModLog"> Mostrar en el chat las acciones de moderación</label>
+          <div class="set-card acct" id="acct-kick">
+            <div class="set-card-head"><span class="plat-dot kick"></span><b>Kick</b><span class="acct-state"></span></div>
+            <span id="kick-auth-status" class="note">Sin sesión</span>
+            <label>Client ID de tu app de Kick
+              <input name="kickClientId" autocapitalize="off" spellcheck="false">
+            </label>
+            <label>Client Secret de tu app de Kick
+              <input name="kickClientSecret" type="password" autocomplete="off" autocapitalize="off" spellcheck="false">
+            </label>
+            <div class="row">
+              <button type="button" id="kick-login" class="primary">Iniciar sesión</button>
+              <button type="button" id="kick-logout" hidden>Cerrar sesión</button>
+            </div>
+          </div>
 
-      <details>
-        <summary>Avanzado (Kick)</summary>
-        <label>ID del canal de Kick (si no se detecta solo; solo con un canal de Kick)
-          <input name="kickChatroomId" inputmode="numeric" placeholder="automático">
-        </label>
-        <p class="note">Ábrelo en el navegador: <code>kick.com/api/v2/channels/TU_CANAL</code> y copia el primer número: <code>{"id":12345,…</code></p>
-      </details>
+          <div class="set-card acct" id="acct-starvios">
+            <div class="set-card-head"><span class="plat-dot starvios"></span><b>Starvios</b><span class="acct-state"></span></div>
+            <span id="starvios-auth-status" class="note">Sin sesión</span>
+            <div id="sv-credentials" class="stack">
+              <label>Correo <input id="sv-email" type="email" autocomplete="username" autocapitalize="off" spellcheck="false"></label>
+              <label>Contraseña <input id="sv-pass" type="password" autocomplete="current-password"></label>
+              <p class="note">La contraseña solo se envía a Starvios y no se guarda.</p>
+            </div>
+            <div class="row">
+              <button type="button" id="starvios-login" class="primary">Iniciar sesión</button>
+              <button type="button" id="starvios-logout" hidden>Cerrar sesión</button>
+            </div>
+          </div>
 
-      <div class="row end">
-        <button type="button" id="btn-clear">Limpiar chat</button>
-        <button value="cancel" formnovalidate>Cancelar</button>
-        <button value="save" class="primary" id="btn-save">Guardar</button>
+          <p class="note">URL de redirección para tus apps de Twitch y Kick:
+            <code id="redirect-url"></code> <button type="button" class="link-btn" id="copy-redirect">Copiar</button></p>
+        </section>
+
+        <!-- ===== Vista ===== -->
+        <section data-spanel="view" class="set-panel">
+          <div class="set-card">
+            <div class="set-card-head"><b>Tamaño de letra</b><output id="fs-val" class="set-val"></output></div>
+            <input type="range" name="fontSize" min="14" max="30" step="1" aria-label="Tamaño de letra">
+            <div class="fs-preview" id="fs-preview"><b>Pepe</b>: así se ve el chat 👋</div>
+          </div>
+          <div class="set-card">
+            <label class="toggle set-switch"><span>Mostrar la hora de cada mensaje</span><input type="checkbox" name="showTime"></label>
+            <label class="toggle set-switch"><span>Mostrar en el chat las acciones de moderación<small>bans, timeouts, mensajes borrados…</small></span><input type="checkbox" name="showModLog"></label>
+            <label class="toggle set-switch"><span>Mantener la pantalla encendida</span><input type="checkbox" name="wakeLock"></label>
+          </div>
+          <div class="set-card">
+            <div class="set-card-head"><b>Colores del chat</b></div>
+            <ul class="legend-list">
+              <li><span class="lg twitch"></span>Twitch <span class="lg kick"></span>Kick <span class="lg starvios"></span>Starvios</li>
+              <li><span class="lg mention"></span>Te mencionaron (@tu_nombre)</li>
+              <li><span class="lg reply-me"></span>Te respondieron</li>
+              <li><span class="lg event"></span>Eventos: subs, raids, bits, donaciones…</li>
+              <li><span class="lg shared"></span>Mensaje del chat compartido (un color por canal)</li>
+            </ul>
+          </div>
+        </section>
+
+        <!-- ===== Avanzado ===== -->
+        <section data-spanel="advanced" class="set-panel">
+          <div class="set-card">
+            <div class="set-card-head"><span class="plat-dot kick"></span><b>ID del canal de Kick</b></div>
+            <p class="note">Solo si el chat de Kick no se detecta solo (y tienes un solo canal de Kick).
+              Ábrelo en el navegador: <code>kick.com/api/v2/channels/TU_CANAL</code> y copia el primer número: <code>{"id":12345,…</code></p>
+            <input name="kickChatroomId" inputmode="numeric" placeholder="automático" aria-label="ID del canal de Kick">
+          </div>
+          <div class="set-card">
+            <div class="set-card-head"><b>Chat</b></div>
+            <div class="row">
+              <button type="button" id="btn-clear">🧹 Limpiar el chat</button>
+              <span class="note">Solo borra lo que ves en esta pantalla.</span>
+            </div>
+          </div>
+          <div class="set-card">
+            <div class="set-card-head"><b>Actualizaciones</b></div>
+            <div class="row">
+              <button type="button" id="btn-update">🔄 Buscar actualización</button>
+              <span class="note" id="update-note"></span>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== Novedades ===== -->
+        <section data-spanel="news" class="set-panel" id="release-notes"></section>
       </div>
+
+      <footer class="set-foot">
+        <button value="save" class="primary" id="btn-save">Guardar</button>
+        <button value="cancel" formnovalidate class="set-cancel">Cancelar</button>
+      </footer>
     </form>
   </dialog>
 
@@ -306,5 +366,6 @@
   <script src="dashboard.js"></script>
   <script src="chatplus.js"></script>
   <script src="content.js"></script>
+  <script src="settings.js"></script>
 </body>
 </html>

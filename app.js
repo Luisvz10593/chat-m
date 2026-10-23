@@ -1929,7 +1929,7 @@ $('#target').addEventListener('change', () => {
   updateComposer();
 });
 
-$('#login-cta').addEventListener('click', openSettings);
+$('#login-cta').addEventListener('click', () => openSettings(sources().length ? 'accounts' : 'channels'));
 
 $('#send-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1965,7 +1965,9 @@ $('#send-form').addEventListener('submit', async (e) => {
 const settings = $('#settings');
 const form = $('#settings-form');
 
-function openSettings() {
+// tab: pestaña a mostrar ('channels', 'accounts', 'view', 'advanced', 'news')
+function openSettings(tab) {
+  if (typeof tab !== 'string') tab = null;
   for (const el of form.elements) {
     if (!el.name || !(el.name in cfg)) continue;
     if (el.type === 'checkbox') el.checked = !!cfg[el.name];
@@ -1974,6 +1976,7 @@ function openSettings() {
   $('#redirect-url').textContent = redirectUrl();
   updateAuthUi();
   settings.showModal();
+  if (typeof onSettingsOpen === 'function') onSettingsOpen(tab); // pestañas (settings.js)
 }
 
 function updateAuthUi() {
@@ -1996,8 +1999,17 @@ function updateAuthUi() {
     status.classList.toggle('warn', outdated[p]);
     $(`#${p}-login`).hidden = !!who;
     $(`#${p}-logout`).hidden = !who;
+    // Tarjeta de la cuenta: etiqueta de estado y campos solo cuando no hay sesión
+    const card = $(`#acct-${p}`);
+    card.dataset.state = !who ? 'off' : outdated[p] ? 'warn' : 'on';
+    card.querySelector('.acct-state').textContent = !who ? 'Sin sesión' : outdated[p] ? 'Falta permiso' : 'Conectado';
+    for (const l of card.querySelectorAll(':scope > label')) l.hidden = !!who;
+    status.hidden = !who; // sin sesión ya lo dice la etiqueta
+    const extra = card.querySelector('.acct-extra');
+    if (extra) extra.hidden = !who;
   }
   $('#sv-credentials').hidden = !!svAuth;
+  $('#acct-dot').hidden = !PLATFORMS.some((p) => outdated[p]);
 }
 
 // Vista previa del tamaño de letra mientras se mueve el control
@@ -2055,7 +2067,7 @@ $('#starvios-login').addEventListener('click', async (e) => {
   }
 });
 $('#starvios-logout').addEventListener('click', () => starviosLogout());
-$('#btn-clear').addEventListener('click', () => { feed.replaceChildren(); });
+$('#btn-clear').addEventListener('click', () => { feed.replaceChildren(); toast('Chat limpiado'); });
 
 /* =========================================================
    Pantalla siempre encendida
