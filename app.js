@@ -169,6 +169,7 @@ function applyView() {
     ? cfg.hidden.map((k) => `.msg[data-src="${CSS.escape(k)}"]`).join(',') + '{display:none}'
     : '';
   renderChips();
+  renderSharedBar();
   updateComposer();
 }
 
@@ -191,9 +192,19 @@ function fmtTime(d) {
   return d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
 }
 
+// Tus nombres: los de tus cuentas; si no iniciaste sesión en una plataforma,
+// se usa su primer canal configurado (normalmente el tuyo)
 function myNames() {
-  return [auth && auth.login, kickAuth && kickAuth.name, ...sources().map((s) => s.ch)]
-    .filter(Boolean).map((n) => n.toLowerCase());
+  const logged = { twitch: auth && auth.login, kick: kickAuth && kickAuth.name, starvios: svAuth && svAuth.username };
+  return PLATFORMS.map((p) => logged[p] || channelsOf(p)[0])
+    .filter(Boolean).map((n) => String(n).toLowerCase());
+}
+
+// Elemento en pantalla de un mensaje (para saltar al mensaje respondido)
+function findMsgEl(platform, id) {
+  if (!id) return null;
+  const q = (x) => feed.querySelector(`.msg.${platform}[data-id="${CSS.escape(x)}"]`);
+  return q(id) || (platform === 'twitch' && twAlias.has(id) ? q(twAlias.get(id)) : null);
 }
 
 function chanTag(ch) {
@@ -229,16 +240,34 @@ function addMessage(m) {
     sh.className = 'shared';
     sh.dataset.room = m.shared.roomId;
     sh.title = 'Mensaje del chat compartido de otro canal';
-    sh.textContent = '🤝 ' + (m.shared.name || 'chat compartido');
+    sh.textContent = '🤝 ' + (m.shared.name || 'otro canal');
     content.append(sh);
     el.classList.add('from-shared');
+    el.style.setProperty('--sh', sharedColor(m.shared.roomId)); // un color por canal participante
   }
 
+  const mine = myNames();
+  const fromMe = mine.includes(String(m.login || m.user || '').toLowerCase());
+
+  // Respuesta: muestra a quién y qué le respondieron; tocarla salta a ese mensaje
   if (m.replyTo) {
-    const ref = document.createElement('span');
+    const ref = document.createElement('div');
     ref.className = 'reply-ref';
-    ref.textContent = '↪ respondiendo a @' + m.replyTo;
+    const who = document.createElement('b');
+    who.textContent = '↪ @' + m.replyTo;
+    ref.append(who);
+    if (m.replyBody) ref.append(document.createTextNode(' ' + m.replyBody));
+    ref.addEventListener('click', (e) => {
+      const target = findMsgEl(m.platform, m.replyId);
+      if (!target) return; // ya no está en pantalla: abre las acciones normales
+      e.stopPropagation();
+      target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      target.classList.remove('flash');
+      void target.offsetWidth;
+      target.classList.add('flash');
+    });
     content.append(ref);
+    if (!fromMe && mine.includes(String(m.replyToLogin || m.replyTo).toLowerCase())) el.classList.add('reply-me');
   }
 
   // Insignias: imágenes reales de Twitch si ya están cargadas (chatplus.js); si no, etiquetas de texto
@@ -275,8 +304,12 @@ function addMessage(m) {
   }
   content.append(body);
 
+  // Te mencionan (@tu_nombre) → amarillo; te responden → azul (arriba)
   const plain = m.parts.map((p) => p.text || p.alt).join('').toLowerCase();
-  if (myNames().some((n) => plain.includes('@' + n))) el.classList.add('mention');
+  if (!fromMe && !el.classList.contains('reply-me')
+    && mine.some((n) => new RegExp('@' + n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![\\w])').test(plain))) {
+    el.classList.add('mention');
+  }
   if (m.event) el.classList.add('event'); // bits, donaciones…
 
   el.append(time, content);
@@ -432,6 +465,7 @@ function handleIrc(ws, msg) {
       twitchRetry = 0;
       setStatus(srcKey('twitch', ch), 'ok', 'Twitch');
       subscribeEventSub(ch); // follows y canjes de este canal, si hay sesión
+      checkSharedSession(ch); // ¿ya hay un chat compartido en curso?
       break;
     case 'PRIVMSG':
       handleTwitchMsg(tags, msg.prefix, trailing || '', ch);
@@ -446,6 +480,7 @@ function handleIrc(ws, msg) {
       else addSystem('twitch', 'El chat de Twitch fue limpiado por un moderador.', false, ch);
       break;
     case 'USERNOTICE': {
+      if (isSharedTw(tags)) noteSharedMsg(ch, tags['source-room-id']);
       if (twDuplicate(tags)) break; // el mismo evento llegó por otro canal del chat compartido
       // En chat compartido llega como "sharedchatnotice" y el tipo real va en "source-msg-id"
       const shared = tags['msg-id'] === 'sharedchatnotice' || isSharedTw(tags);
@@ -538,14 +573,133 @@ function twRoomName(roomId) {
       twRoomNames[roomId] = login;
       store.set('twRoomNames', twRoomNames);
       for (const s of feed.querySelectorAll(`.shared[data-room="${CSS.escape(roomId)}"]`)) s.textContent = '🤝 ' + login;
+      renderSharedBar();
     }).catch(() => {}));
   }
   return null;
 }
 
+// Igual que twRoomName pero espera a conocer el nombre
+async function twRoomNameAsync(roomId) {
+  const now = twRoomName(roomId);
+  if (now) return now;
+  await twNameLookups.get(roomId);
+  return twRoomNames[roomId] || null;
+}
+
+/* ---------- Aviso del chat compartido ----------
+ * Barra arriba del chat con los canales con los que compartes, un color por
+ * canal (el mismo que el borde de sus mensajes) y avisos cuando empieza o
+ * termina. Se entera por EventSub (channel.shared_chat.*), consultando a Twitch
+ * (shared_chat/session) y, sin sesión iniciada, al llegar mensajes de otro canal.
+ */
+// Sin azul ni amarillo: esos son "te respondieron" y "te mencionaron"
+const SHARED_COLORS = ['#4ade80', '#f472b6', '#c084fc', '#fb923c', '#2dd4bf', '#f87171', '#a3e635', '#e879f9'];
+const twRoomColors = new Map();
+const twShared = {};              // canal tuyo → { ids:[ids de canal], host, fromApi, seen:{id: hora} }
+const twSharedChecked = new Map(); // canal → última consulta a la API
+
+function sharedColor(roomId) {
+  if (!twRoomColors.has(roomId)) twRoomColors.set(roomId, SHARED_COLORS[twRoomColors.size % SHARED_COLORS.length]);
+  return twRoomColors.get(roomId);
+}
+
+async function setSharedSession(ch, ids, host, fromApi) {
+  const own = twitchRooms[ch];
+  ids = [...new Set(ids.filter(Boolean))];
+  const prev = twShared[ch];
+  const others = ids.filter((id) => id !== own);
+  if (!others.length) { endSharedSession(ch); return; }
+  const added = others.filter((id) => !prev || !prev.ids.includes(id));
+  const gone = prev ? prev.ids.filter((id) => id !== own && !ids.includes(id)) : [];
+  twShared[ch] = { ids, host: host || (prev && prev.host) || null, fromApi: fromApi || !!(prev && prev.fromApi), seen: (prev && prev.seen) || {} };
+  for (const id of others) twShared[ch].seen[id] = twShared[ch].seen[id] || Date.now();
+  renderSharedBar();
+  const names = async (list) => (await Promise.all(list.map(twRoomNameAsync))).map((n) => n || 'otro canal').join(', ');
+  if (!prev) addSystem('twitch', `🤝 ¡Chat compartido activo! Ahora también ves los mensajes de: ${await names(others)}`, true, ch);
+  else if (added.length) addSystem('twitch', `🤝 Se unió al chat compartido: ${await names(added)}`, true, ch);
+  if (gone.length) addSystem('twitch', `🤝 Salió del chat compartido: ${await names(gone)}`, true, ch);
+}
+
+function endSharedSession(ch, text = '🤝 Terminó el chat compartido') {
+  if (!twShared[ch]) return;
+  delete twShared[ch];
+  renderSharedBar();
+  addSystem('twitch', text, true, ch);
+}
+
+// Llegó por IRC un mensaje de otro canal: hay chat compartido aunque no lo hayamos visto empezar
+function noteSharedMsg(ch, roomId) {
+  const s = twShared[ch];
+  if (s && s.ids.includes(roomId)) { s.seen[roomId] = Date.now(); return; }
+  setSharedSession(ch, [...(s ? s.ids : [twitchRooms[ch]]), roomId], null, false);
+  checkSharedSession(ch); // pide la lista completa a Twitch si hay sesión
+}
+
+async function checkSharedSession(ch, force) {
+  const room = twitchRooms[ch];
+  if (!auth || !room) return;
+  if (!force && Date.now() - (twSharedChecked.get(ch) || 0) < 60000) return;
+  twSharedChecked.set(ch, Date.now());
+  try {
+    const j = await helix('GET', 'shared_chat/session', { broadcaster_id: room });
+    const s = j.data && j.data[0];
+    if (s && (s.participants || []).length > 1) {
+      setSharedSession(ch, s.participants.map((p) => p.broadcaster_id), s.host_broadcaster_id, true);
+    } else endSharedSession(ch);
+  } catch { /* sin permiso o sin conexión: se queda lo que sabemos */ }
+}
+
+function handleSharedChatEvent(type, ev) {
+  const ch = ev.broadcaster_user_login;
+  if (type === 'channel.shared_chat.end') { endSharedSession(ch); return; }
+  for (const p of ev.participants || []) {
+    if (p.broadcaster_user_login) twRoomNames[p.broadcaster_user_id] = p.broadcaster_user_login;
+  }
+  store.set('twRoomNames', twRoomNames);
+  setSharedSession(ch, (ev.participants || []).map((p) => p.broadcaster_user_id), ev.host_broadcaster_user_id, true);
+}
+
+// Cada minuto: confirma con Twitch que sigue; sin sesión, lo da por terminado
+// si en 15 min no llegó ningún mensaje de los otros canales
+setInterval(() => {
+  for (const [ch, s] of Object.entries(twShared)) {
+    if (!channelsOf('twitch').includes(ch)) { delete twShared[ch]; renderSharedBar(); continue; }
+    if (auth) { checkSharedSession(ch); continue; }
+    if (!s.fromApi && Date.now() - Math.max(...Object.values(s.seen)) > 15 * 60000) {
+      endSharedSession(ch, '🤝 Parece que terminó el chat compartido (ya no llegan mensajes de otros canales)');
+    }
+  }
+}, 60000);
+
+function renderSharedBar() {
+  const bar = $('#shared-bar');
+  if (!bar) return;
+  const rows = Object.entries(twShared).filter(([ch]) => !cfg.hidden.includes(srcKey('twitch', ch)));
+  bar.hidden = !rows.length;
+  bar.replaceChildren(...rows.map(([ch, s]) => {
+    const row = document.createElement('div');
+    row.className = 'shared-row';
+    const title = document.createElement('span');
+    title.className = 'shared-title';
+    title.textContent = '🤝 Chat compartido' + (channelsOf('twitch').length > 1 ? ' en #' + ch : '') + ' con';
+    row.append(title);
+    for (const id of s.ids.filter((x) => x !== twitchRooms[ch])) {
+      const c = document.createElement('span');
+      c.className = 'shared-chip';
+      c.style.setProperty('--sh', sharedColor(id));
+      c.textContent = (s.host === id ? '👑 ' : '') + (twRoomName(id) || 'otro canal');
+      if (s.host === id) c.title = 'Anfitrión de la sesión';
+      row.append(c);
+    }
+    return row;
+  }));
+}
+
 function handleTwitchMsg(tags, prefix, text, channel) {
-  if (twDuplicate(tags)) return;
   const shared = isSharedTw(tags);
+  if (shared) noteSharedMsg(channel, tags['source-room-id']);
+  if (twDuplicate(tags)) return;
   let action = false;
   if (text.startsWith('\x01ACTION ')) { action = true; text = text.slice(8).replace(/\x01$/, ''); }
 
@@ -584,6 +738,9 @@ function handleTwitchMsg(tags, prefix, text, channel) {
     time: tags['tmi-sent-ts'] ? new Date(Number(tags['tmi-sent-ts'])) : new Date(),
     action,
     replyTo,
+    replyToLogin: tags['reply-parent-user-login'] || null,
+    replyBody: tags['reply-parent-msg-body'] || null,
+    replyId: tags['reply-parent-msg-id'] || null,
     sourceId: tags['source-id'] || null,
     shared: shared ? { roomId: tags['source-room-id'], name: twRoomName(tags['source-room-id']) } : null,
   });
@@ -834,6 +991,10 @@ async function subscribeEventSub(ch) {
     ['channel.shield_mode.end', '1', asMod, 'moderator:manage:shield_mode'],
     ['channel.warning.acknowledge', '1', asMod, 'moderator:read:warnings'],
     ['channel.shoutout.receive', '1', asMod, 'moderator:manage:shoutouts'],
+    // Chat compartido: empieza, cambia quién participa, termina (no pide permiso)
+    ['channel.shared_chat.begin', '1', own, null],
+    ['channel.shared_chat.update', '1', own, null],
+    ['channel.shared_chat.end', '1', own, null],
   ];
   if (room === auth.userId) {
     // Solo del canal propio
@@ -860,7 +1021,7 @@ async function subscribeEventSub(ch) {
   subs.push(['user.whisper.message', '1', { user_id: auth.userId }, 'user:read:whispers']);
   for (const [type, version, condition, scope] of subs) {
     const key = type + ':' + (condition.user_id || room);
-    if (esSubscribed.has(key) || !(auth.scopes || []).includes(scope)) continue;
+    if (esSubscribed.has(key) || (scope && !(auth.scopes || []).includes(scope))) continue;
     esSubscribed.add(key);
     try {
       await helix('POST', 'eventsub/subscriptions', null,
@@ -903,7 +1064,9 @@ function twitchEventToChat(type, ev, ch) {
     'channel.warning.acknowledge': () => `⚠️ ${ev.user_name} aceptó la advertencia`,
   };
   if (simple[type]) { addSystem('twitch', simple[type](), true, ch); return; }
-  if (type === 'channel.follow') {
+  if (type.startsWith('channel.shared_chat.')) {
+    handleSharedChatEvent(type, ev);
+  } else if (type === 'channel.follow') {
     addSystem('twitch', `❤️ ${ev.user_name} empezó a seguir el canal`, true, ch);
   } else if (type === 'automod.message.hold') {
     addAutomodCard(ev);
@@ -1151,6 +1314,7 @@ function handleKickMsg(d, channel) {
   let meta = d.metadata;
   if (typeof meta === 'string') { try { meta = JSON.parse(meta); } catch { meta = null; } }
   const replyTo = d.type === 'reply' && meta && meta.original_sender ? meta.original_sender.username : null;
+  const orig = (replyTo && meta.original_message) || {};
 
   addMessage({
     platform: 'kick',
@@ -1163,6 +1327,8 @@ function handleKickMsg(d, channel) {
     parts: kickParts(d.content || ''),
     time: d.created_at ? new Date(d.created_at) : new Date(),
     replyTo,
+    replyBody: orig.content ? orig.content.replace(/\[emote:\d+:([^\]]*)\]/g, '$1') : null,
+    replyId: orig.id || null,
   });
 }
 
@@ -1444,6 +1610,7 @@ function handleStarviosMsg(d, channel) {
   const badges = (d.badges || []).map((b) => BADGE_ALIASES[b] || b).filter((b) => BADGE_LABELS[b]);
   const parts = starviosParts(body);
   if (d.coins > 0) parts.unshift({ text: `⭐ ${d.coins} Starvies · ` });
+  const reply = (d.meta && d.meta.reply) || null;
 
   addMessage({
     platform: 'starvios',
@@ -1457,6 +1624,10 @@ function handleStarviosMsg(d, channel) {
     parts,
     event: d.coins > 0,
     time: new Date(d.created_at),
+    replyTo: reply ? reply.display_name || reply.username || '?' : null,
+    replyToLogin: reply ? reply.username : null,
+    replyBody: reply ? reply.body : null,
+    replyId: reply ? reply.id || d.meta.reply_to || null : null,
   });
   if (d.is_deleted) markDeleted('starvios', d.id);
 }
@@ -1481,18 +1652,34 @@ async function svTokenRequest(grant, body) {
     const msg = j.error_description || j.msg || j.message || '';
     throw new Error(/invalid/i.test(msg) ? 'Correo o contraseña incorrectos.' : 'Starvios rechazó el inicio de sesión. ' + msg);
   }
+  const userId = j.user && j.user.id;
   svAuth = {
     access: j.access_token,
     refresh: j.refresh_token,
     expiresAt: Date.now() + (j.expires_in || 3600) * 1000,
-    userId: j.user && j.user.id,
+    userId,
     email: j.user && j.user.email,
+    username: svAuth && svAuth.userId === userId ? svAuth.username : undefined,
   };
   store.set('svAuth', svAuth);
 }
 
+// Tu nombre de usuario de Starvios (para saber cuándo te mencionan o te responden)
+async function svLoadUsername() {
+  if (!svAuth || svAuth.username || !svAuth.userId) return;
+  try {
+    const rows = await svGet(`profiles?select=username&id=eq.${svAuth.userId}`);
+    if (rows[0] && rows[0].username && svAuth) {
+      svAuth.username = rows[0].username;
+      store.set('svAuth', svAuth);
+    }
+  } catch { /* se intenta de nuevo la próxima vez */ }
+}
+setTimeout(svLoadUsername, 1500);
+
 async function starviosLogin(email, password) {
   await svTokenRequest('password', { email, password });
+  svLoadUsername();
   updateAuthUi();
   updateComposer();
   toast('Sesión de Starvios iniciada.');

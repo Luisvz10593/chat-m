@@ -28,7 +28,14 @@ chat queda siempre visible y la sección se abre a su lado.
 - Lee los chats de Twitch, Kick y Starvios en una sola lista
   (borde morado = Twitch, verde = Kick, rosa = Starvios).
 - Emotes (Twitch y Kick), insignias (STREAMER / MOD / VIP / SUB), avisos de subs, raids y donaciones de Starvies.
-- Resalta los mensajes que te mencionan.
+- **Respuestas:** arriba del mensaje se ve a quién y qué le respondieron; tócalo para
+  saltar al mensaje original (si sigue en pantalla).
+- **Te mencionan** (`@tu_nombre`) → fondo amarillo. **Te responden** → fondo azul.
+  Usa los nombres de las cuentas con las que iniciaste sesión (sin sesión, el primer
+  canal de esa plataforma).
+- **Chat compartido de Twitch:** barra arriba del chat con los canales con los que
+  compartes (👑 = anfitrión), avisos cuando empieza, alguien entra o sale y termina,
+  y los mensajes de cada canal invitado con su propio color y etiqueta 🤝.
 - **Varios canales por plataforma:** en ⚙ escríbelos separados por coma
   (`canal1, canal2`). Con una sola cuenta por plataforma moderas todos los canales
   donde esa cuenta sea dueña o moderadora.
