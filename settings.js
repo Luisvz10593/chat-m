@@ -6,6 +6,16 @@
 // Al publicar una versión nueva: agrega su entrada arriba (y sube CACHE en sw.js)
 const RELEASES = [
   {
+    v: '2.8', date: '2026-10-23', title: 'Chat compartido de Twitch, ahora sí',
+    items: [
+      'Al detectar un chat compartido, Chat M entra también al chat de los otros canales y muestra sus mensajes en el tuyo (con su color y etiqueta 🤝), sin repetirlos.',
+      'Con tu sesión de Twitch también los recibe por EventSub, que dice de qué canal viene cada mensaje.',
+      'Revisa cada minuto si alguno de tus canales empezó o terminó un chat compartido, aunque se pierda el aviso.',
+      'Los mensajes que Twitch marca como "solo en su canal" no se muestran, igual que en Twitch.',
+      'Necesita volver a iniciar sesión en Twitch una vez (⚙ → Cuentas) para el permiso nuevo de leer el chat.',
+    ],
+  },
+  {
     v: '2.7', date: '2026-10-22', title: 'Canjes renovados y arreglos del Panel',
     items: [
       '🏆 Canjes con dos vistas: 📥 Solicitudes y 🏆 Recompensas, de todos tus canales juntos (🌐 Todos) o de uno solo.',

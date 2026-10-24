@@ -106,6 +106,7 @@ const TWITCH_SCOPES = [
   'channel:manage:schedule', 'channel:manage:videos', 'channel:manage:clips', 'editor:manage:clips',
   'user:manage:chat_color', 'user:manage:whispers', 'user:manage:blocked_users', 'user:read:blocked_users',
   'user:read:follows', 'user:read:moderated_channels', 'user:read:whispers',
+  'user:read:chat', // chat compartido: mensajes de los otros canales por EventSub
 ].join(' ');
 const twitchMissingScopes = () => !!auth && TWITCH_SCOPES.split(' ').some((s) => !(auth.scopes || []).includes(s));
 
@@ -404,7 +405,7 @@ function connectTwitch() {
     ws.send('CAP REQ :twitch.tv/tags twitch.tv/commands');
     ws.send('PASS SCHMOOPIIE');
     ws.send('NICK justinfan' + Math.floor(1000 + Math.random() * 80000));
-    ws.send('JOIN ' + chans.map((c) => '#' + c).join(','));
+    ws.send('JOIN ' + [...chans, ...twSharedJoins.keys()].map((c) => '#' + c).join(','));
     // Twitch no avisa cuando un canal no existe: si no responde, lo marcamos
     setTimeout(() => {
       if (twitchWs !== ws) return;
@@ -456,6 +457,8 @@ function handleIrc(ws, msg) {
   const { tags, command, trailing } = msg;
   const ch = (msg.params[0] || '').replace(/^#/, '');
   const known = channelsOf('twitch').includes(ch);
+  // Canal de otro streamer al que entramos solo por el chat compartido
+  if (!known && twSharedJoins.has(ch) && command !== 'PING') { handleSharedJoinIrc(msg, ch); return; }
   switch (command) {
     case 'PING':
       ws.send('PONG :' + (trailing || 'tmi.twitch.tv'));
@@ -615,6 +618,8 @@ async function setSharedSession(ch, ids, host, fromApi) {
   twShared[ch] = { ids, host: host || (prev && prev.host) || null, fromApi: fromApi || !!(prev && prev.fromApi), seen: (prev && prev.seen) || {} };
   for (const id of others) twShared[ch].seen[id] = twShared[ch].seen[id] || Date.now();
   renderSharedBar();
+  syncSharedJoins();       // entra al chat de los demás participantes
+  ensureSharedChatSub(ch); // y pide a EventSub los mensajes compartidos
   const names = async (list) => (await Promise.all(list.map(twRoomNameAsync))).map((n) => n || 'otro canal').join(', ');
   if (!prev) addSystem('twitch', `🤝 ¡Chat compartido activo! Ahora también ves los mensajes de: ${await names(others)}`, true, ch);
   else if (added.length) addSystem('twitch', `🤝 Se unió al chat compartido: ${await names(added)}`, true, ch);
@@ -625,6 +630,7 @@ function endSharedSession(ch, text = '🤝 Terminó el chat compartido') {
   if (!twShared[ch]) return;
   delete twShared[ch];
   renderSharedBar();
+  syncSharedJoins();
   addSystem('twitch', text, true, ch);
 }
 
@@ -646,7 +652,12 @@ async function checkSharedSession(ch, force) {
     const s = j.data && j.data[0];
     if (s && (s.participants || []).length > 1) {
       setSharedSession(ch, s.participants.map((p) => p.broadcaster_id), s.host_broadcaster_id, true);
-    } else endSharedSession(ch);
+    } else {
+      // Si hace poco llegaron mensajes de otros canales, la sesión sigue aunque la API tarde en saberlo
+      const cur = twShared[ch];
+      if (cur && Math.max(0, ...Object.values(cur.seen)) > Date.now() - 180000) return;
+      endSharedSession(ch);
+    }
   } catch { /* sin permiso o sin conexión: se queda lo que sabemos */ }
 }
 
@@ -660,12 +671,14 @@ function handleSharedChatEvent(type, ev) {
   setSharedSession(ch, (ev.participants || []).map((p) => p.broadcaster_user_id), ev.host_broadcaster_user_id, true);
 }
 
-// Cada minuto: confirma con Twitch que sigue; sin sesión, lo da por terminado
-// si en 15 min no llegó ningún mensaje de los otros canales
+// Cada minuto, con sesión de Twitch: pregunta en todos tus canales si hay chat
+// compartido (empiece, cambie o termine). Sin sesión, lo da por terminado si en
+// 15 min no llegó ningún mensaje de los otros canales.
 setInterval(() => {
+  if (auth) for (const ch of channelsOf('twitch')) checkSharedSession(ch);
   for (const [ch, s] of Object.entries(twShared)) {
-    if (!channelsOf('twitch').includes(ch)) { delete twShared[ch]; renderSharedBar(); continue; }
-    if (auth) { checkSharedSession(ch); continue; }
+    if (!channelsOf('twitch').includes(ch)) { delete twShared[ch]; renderSharedBar(); syncSharedJoins(); continue; }
+    if (auth) continue;
     if (!s.fromApi && Date.now() - Math.max(...Object.values(s.seen)) > 15 * 60000) {
       endSharedSession(ch, '🤝 Parece que terminó el chat compartido (ya no llegan mensajes de otros canales)');
     }
@@ -696,15 +709,17 @@ function renderSharedBar() {
   }));
 }
 
-function handleTwitchMsg(tags, prefix, text, channel) {
-  const shared = isSharedTw(tags);
-  if (shared) noteSharedMsg(channel, tags['source-room-id']);
+// viaRoom: el mensaje viene directo del canal de otro participante del chat compartido
+function handleTwitchMsg(tags, prefix, text, channel, viaRoom) {
+  const shared = !!viaRoom || isSharedTw(tags);
+  const srcRoom = viaRoom || tags['source-room-id'];
+  if (shared && !viaRoom) noteSharedMsg(channel, srcRoom);
   if (twDuplicate(tags)) return;
   let action = false;
   if (text.startsWith('\x01ACTION ')) { action = true; text = text.slice(8).replace(/\x01$/, ''); }
 
   // En chat compartido, las insignias que importan son las del canal de origen
-  const badgeTag = shared && tags['source-badges'] != null ? tags['source-badges'] : tags.badges;
+  const badgeTag = shared && !viaRoom && tags['source-badges'] != null ? tags['source-badges'] : tags.badges;
   const badges = (badgeTag || '').split(',').map((b) => b.split('/')[0]).filter((b) => BADGE_LABELS[b]);
   const replyTo = tags['reply-parent-display-name'] || null;
   // Twitch antepone "@usuario " en las respuestas: lo quitamos porque ya mostramos la referencia
@@ -716,7 +731,7 @@ function handleTwitchMsg(tags, prefix, text, channel) {
 
   let parts = twitchParts(text, tags.emotes);
   const bits = Number(tags.bits) || 0;
-  const roomForAssets = shared ? tags['source-room-id'] : tags['room-id'];
+  const roomForAssets = shared ? srcRoom : tags['room-id'];
   // Bits: "Cheer100" se muestra con su imagen animada (chatplus.js)
   if (bits && typeof cheerify === 'function') parts = cheerify(parts, roomForAssets);
   if (bits) parts.unshift({ text: `💎 ${bits} bits · ` });
@@ -741,9 +756,131 @@ function handleTwitchMsg(tags, prefix, text, channel) {
     replyToLogin: tags['reply-parent-user-login'] || null,
     replyBody: tags['reply-parent-msg-body'] || null,
     replyId: tags['reply-parent-msg-id'] || null,
-    sourceId: tags['source-id'] || null,
-    shared: shared ? { roomId: tags['source-room-id'], name: twRoomName(tags['source-room-id']) } : null,
+    sourceId: tags['source-id'] || (viaRoom ? tags.id : null),
+    shared: shared ? { roomId: srcRoom, name: twRoomName(srcRoom) } : null,
   });
+}
+
+/* ---------- Respaldos para ver el chat compartido ----------
+ * Twitch debería reenviar por IRC los mensajes de los otros canales, pero no
+ * siempre llegan. Cuando sabemos que hay chat compartido:
+ * 1) entramos también al chat de cada participante y mostramos sus mensajes
+ *    en tu canal (sin los que Twitch marca como "solo en su canal");
+ * 2) con sesión de Twitch, EventSub channel.chat.message (dice de qué canal viene).
+ * Los repetidos se descartan con el id del mensaje original.
+ */
+const twSharedJoins = new Map(); // canal ajeno → tu canal donde se muestran sus mensajes
+
+async function syncSharedJoins() {
+  const want = new Map();
+  for (const [ch, s] of Object.entries(twShared)) {
+    for (const id of s.ids) {
+      if (id === twitchRooms[ch]) continue;
+      const login = await twRoomNameAsync(id);
+      if (login && !channelsOf('twitch').includes(login)) want.set(login, ch);
+    }
+  }
+  const join = [...want.keys()].filter((l) => !twSharedJoins.has(l));
+  const part = [...twSharedJoins.keys()].filter((l) => !want.has(l));
+  twSharedJoins.clear();
+  for (const [l, c] of want) twSharedJoins.set(l, c);
+  const ws = twitchWs;
+  if (!ws || ws.readyState !== WebSocket.OPEN) return; // al reconectar ya entra a twSharedJoins
+  if (join.length) ws.send('JOIN ' + join.map((l) => '#' + l).join(','));
+  if (part.length) ws.send('PART ' + part.map((l) => '#' + l).join(','));
+}
+
+function handleSharedJoinIrc(msg, login) {
+  const { tags, command, trailing } = msg;
+  const owner = twSharedJoins.get(login);
+  const room = tags['room-id'];
+  if (room && !twRoomNames[room]) { twRoomNames[room] = login; store.set('twRoomNames', twRoomNames); }
+  if (!owner || !twShared[owner]) return;
+  if (room && command === 'PRIVMSG') twShared[owner].seen[room] = Date.now();
+  // Copias de otros canales (llegan directo de su canal) y mensajes "solo para su canal"
+  const skip = /^(1|true)$/.test(tags['source-only'] || '') || isSharedTw(tags);
+  switch (command) {
+    case 'PRIVMSG':
+      if (!skip) handleTwitchMsg(tags, msg.prefix, trailing || '', owner, room);
+      break;
+    case 'USERNOTICE':
+      if (skip || twDuplicate(tags)) break;
+      addSystem('twitch', `${TWITCH_EVENT_ICONS[tags['msg-id']] || '✨'} ${twitchEventText(tags)} (en ${login})${trailing ? ' — ' + trailing : ''}`, true, owner);
+      break;
+    case 'CLEARMSG':
+      markDeleted('twitch', tags['target-msg-id']);
+      break;
+    case 'CLEARCHAT':
+      if (trailing) markUserCleared('twitch', owner, trailing);
+      break;
+  }
+}
+
+// EventSub: mensaje de chat; solo nos interesan los que vienen de otro canal
+function handleEsChatMsg(ev) {
+  const ch = ev.broadcaster_user_login;
+  const src = ev.source_broadcaster_user_id;
+  if (!src || src === ev.broadcaster_user_id || !channelsOf('twitch').includes(ch)) return; // lo normal llega por IRC
+  if (ev.source_broadcaster_user_login && twRoomNames[src] !== ev.source_broadcaster_user_login) {
+    twRoomNames[src] = ev.source_broadcaster_user_login;
+    store.set('twRoomNames', twRoomNames);
+  }
+  noteSharedMsg(ch, src);
+  if (twDuplicate({ 'source-id': ev.source_message_id, id: ev.message_id })) return;
+  const msg = ev.message || {};
+  const frags = [...(msg.fragments || [])];
+  const reply = ev.reply || null;
+  // Las respuestas empiezan con "@usuario ": ya mostramos la cita
+  if (reply && frags[0] && frags[0].type === 'mention' && frags[0].mention
+    && frags[0].mention.user_login === reply.parent_user_login) {
+    frags.shift();
+    if (frags[0] && frags[0].type === 'text') frags[0] = { ...frags[0], text: frags[0].text.replace(/^ /, '') };
+  }
+  let parts = frags.map((f) => (f.type === 'emote' && f.emote
+    ? { img: `https://static-cdn.jtvnw.net/emoticons/v2/${encodeURIComponent(f.emote.id)}/default/dark/2.0`, alt: f.text }
+    : { text: f.text }));
+  if (!parts.length) parts = [{ text: msg.text || '' }];
+  const bits = (ev.cheer && ev.cheer.bits) || 0;
+  if (bits && typeof cheerify === 'function') parts = cheerify(parts, src);
+  if (bits) parts.unshift({ text: `💎 ${bits} bits · ` });
+  const badgeList = ev.source_badges || ev.badges || [];
+  addMessage({
+    platform: 'twitch',
+    channel: ch,
+    id: ev.message_id,
+    userId: ev.chatter_user_id,
+    user: ev.chatter_user_name || ev.chatter_user_login,
+    login: ev.chatter_user_login,
+    color: ev.color,
+    badges: [...new Set(badgeList.map((b) => b.set_id).filter((b) => BADGE_LABELS[b]))],
+    twBadges: badgeList.map((b) => [b.set_id, b.id]),
+    badgeRoom: src,
+    parts,
+    event: bits > 0,
+    time: new Date(),
+    replyTo: reply ? reply.parent_user_name : null,
+    replyToLogin: reply ? reply.parent_user_login : null,
+    replyBody: reply ? reply.parent_message_body : null,
+    replyId: reply ? reply.parent_message_id : null,
+    sourceId: ev.source_message_id || null,
+    shared: { roomId: src, name: twRoomName(src) },
+  });
+}
+
+// Pide a EventSub los mensajes de chat de un canal con chat compartido
+async function ensureSharedChatSub(ch) {
+  const room = twitchRooms[ch];
+  if (!esSession || !room || !auth || !(auth.scopes || []).includes('user:read:chat')) return;
+  const key = 'channel.chat.message:' + room;
+  if (esSubscribed.has(key)) return;
+  esSubscribed.add(key);
+  try {
+    await helix('POST', 'eventsub/subscriptions', null, {
+      type: 'channel.chat.message', version: '1',
+      condition: { broadcaster_user_id: room, user_id: auth.userId },
+      transport: { method: 'websocket', session_id: esSession },
+    });
+  } catch { esSubscribed.delete(key); }
 }
 
 function shiftEmotes(emotes, cut) {
@@ -957,7 +1094,10 @@ function connectEventSub(reconnectUrl) {
       esWs = ws;
       esSession = msg.payload.session.id;
       if (old && old !== ws) { old.onclose = null; old.close(); }
-      if (!reconnectUrl) for (const ch of channelsOf('twitch')) subscribeEventSub(ch);
+      if (!reconnectUrl) {
+        for (const ch of channelsOf('twitch')) subscribeEventSub(ch);
+        for (const ch of Object.keys(twShared)) ensureSharedChatSub(ch);
+      }
     } else if (type === 'session_reconnect') {
       connectEventSub(msg.payload.session.reconnect_url);
     } else if (type === 'notification') {
@@ -999,6 +1139,8 @@ async function subscribeEventSub(ch) {
   if (room === auth.userId) {
     // Solo del canal propio
     subs.push(
+      // Mensajes de tu chat: de aquí salen los del chat compartido aunque IRC no los mande
+      ['channel.chat.message', '1', { broadcaster_user_id: room, user_id: auth.userId }, 'user:read:chat'],
       ['channel.channel_points_custom_reward_redemption.add', '1', own, 'channel:read:redemptions'],
       ['channel.hype_train.begin', '2', own, 'channel:read:hype_train'],
       ['channel.hype_train.progress', '2', own, 'channel:read:hype_train'],
@@ -1020,7 +1162,7 @@ async function subscribeEventSub(ch) {
   // Susurros que recibes (una sola vez por sesión, no por canal)
   subs.push(['user.whisper.message', '1', { user_id: auth.userId }, 'user:read:whispers']);
   for (const [type, version, condition, scope] of subs) {
-    const key = type + ':' + (condition.user_id || room);
+    const key = type + ':' + (condition.broadcaster_user_id || condition.user_id);
     if (esSubscribed.has(key) || (scope && !(auth.scopes || []).includes(scope))) continue;
     esSubscribed.add(key);
     try {
@@ -1035,6 +1177,7 @@ const TW_EVENT_LISTENERS = [];
 const onTwitchEvent = (fn) => TW_EVENT_LISTENERS.push(fn);
 
 function handleEventSub(type, ev) {
+  if (type === 'channel.chat.message') { handleEsChatMsg(ev); return; }
   const ch = ev.broadcaster_user_login;
   for (const fn of TW_EVENT_LISTENERS) { try { fn(type, ev); } catch (e) { console.warn(e); } }
   twitchEventToChat(type, ev, ch);
