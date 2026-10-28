@@ -36,9 +36,13 @@
         <div class="brand">Chat <b>M</b></div>
         <!-- Un botón por canal; se generan desde app.js -->
         <div class="chips" id="chips"></div>
+        <button type="button" class="icon-btn" id="btn-player" title="Ver el directo" aria-pressed="false">📺</button>
         <div id="shared-bar" class="shared-bar" hidden></div>
         <div id="pinned-bar" class="pinned-bar" hidden></div>
       </header>
+
+      <!-- Reproductor del directo (player.js) -->
+      <section id="player" class="player" hidden></section>
 
       <main id="feed" aria-live="polite"></main>
 
@@ -366,6 +370,7 @@
   <script src="dashboard.js"></script>
   <script src="chatplus.js"></script>
   <script src="content.js"></script>
+  <script src="player.js"></script>
   <script src="settings.js"></script>
 </body>
 </html>

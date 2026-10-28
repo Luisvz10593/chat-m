@@ -6,6 +6,15 @@
 // Al publicar una versión nueva: agrega su entrada arriba (y sube CACHE en sw.js)
 const RELEASES = [
   {
+    v: '2.9', date: '2026-10-27', title: 'Ver el directo desde el chat',
+    items: [
+      'Botón 📺 arriba del chat: muestra el directo de cualquiera de tus canales visibles, de Twitch, Kick o Starvios.',
+      'También los canales del chat compartido; tocar un canal en la barra 🤝 abre su directo.',
+      'Empieza sin sonido para que no se oiga tu propio directo con eco; súbele desde el reproductor.',
+      'Tres tamaños, botón para abrirlo en su página y recuerda el último canal que viste.',
+    ],
+  },
+  {
     v: '2.8', date: '2026-10-23', title: 'Chat compartido de Twitch, ahora sí',
     items: [
       'Al detectar un chat compartido, Chat M entra también al chat de los otros canales y muestra sus mensajes en el tuyo (con su color y etiqueta 🤝), sin repetirlos.',

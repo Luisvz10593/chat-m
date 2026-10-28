@@ -10,6 +10,7 @@ chat queda siempre visible y la sección se abre a su lado.
 
 - **💬 Chat:** todos tus canales en una lista, eventos, AutoMod, chat compartido,
   mensaje fijado, susurros, 😀 emojis/emotes, enviar a uno o a todos.
+  **📺** arriba del chat muestra el directo de tus canales (y los del chat compartido), sin sonido al empezar.
 - **🛡 Moderar:** solicitudes de desbaneo, sospechosos, baneados, quién está en el chat,
   mods y VIPs, términos bloqueados, niveles de AutoMod, ajustes del chat de Starvios,
   registro de acciones, modo escudo y **tarjeta de usuario** (👤 desde cualquier mensaje).
