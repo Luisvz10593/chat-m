@@ -6,6 +6,15 @@
 // Al publicar una versión nueva: agrega su entrada arriba (y sube CACHE en sw.js)
 const RELEASES = [
   {
+    v: '3.0', date: '2026-10-27', title: 'Varios directos a la vez',
+    items: [
+      '📺 Hasta 4 directos al mismo tiempo: toca los canales de arriba para agregarlos o quitarlos; se acomodan solos para verse lo más grande posible.',
+      'Solo uno suena: el botón 🔊 de cada video le da el sonido y silencia a los demás. En Twitch y Starvios también funciona si le subes el volumen desde su reproductor.',
+      'El que tiene sonido se marca con borde verde.',
+      'Nuevo selector de tamaño (chico, mediano, grande) y una barrita debajo para arrastrar y ajustar la altura a tu gusto (doble toque = mediano).',
+    ],
+  },
+  {
     v: '2.9', date: '2026-10-27', title: 'Ver el directo desde el chat',
     items: [
       'Botón 📺 arriba del chat: muestra el directo de cualquiera de tus canales visibles, de Twitch, Kick o Starvios.',
