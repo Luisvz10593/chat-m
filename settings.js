@@ -6,6 +6,13 @@
 // Al publicar una versión nueva: agrega su entrada arriba (y sube CACHE en sw.js)
 const RELEASES = [
   {
+    v: '3.1', date: '2026-10-27', title: 'Moderación más clara entre canales',
+    items: [
+      'El menú de cada mensaje dice en qué canal se aplican las acciones de moderación (solo en ese).',
+      'Chat compartido de Twitch: los bans y timeouts hechos en otro canal ya no aparecen repetidos en cada uno de tus canales; si vienen de un canal que no tienes en Chat M, dice "(en canal · chat compartido)".',
+    ],
+  },
+  {
     v: '3.0', date: '2026-10-27', title: 'Varios directos a la vez',
     items: [
       '📺 Hasta 4 directos al mismo tiempo: toca los canales de arriba para agregarlos o quitarlos; se acomodan solos para verse lo más grande posible.',

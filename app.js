@@ -1224,6 +1224,10 @@ function twitchEventToChat(type, ev, ch) {
     const status = ev.low_trust_status === 'restricted' ? 'restringido (solo lo ven los mods)' : 'vigilado';
     addSystem('twitch', `👁 ${ev.user_name} (${why}, ${status}): ${(ev.message && ev.message.text) || ''}`, true, ch);
   } else if (type === 'channel.moderate' && cfg.showModLog) {
+    // Chat compartido: Twitch avisa a todos los canales de la sesión de lo que se hizo en uno.
+    // Si ese canal también está en Chat M, ya se muestra ahí; si no, se aclara de dónde vino.
+    const src = ev.source_broadcaster_user_login;
+    if (ev.action.startsWith('shared_chat_') && src && src !== ch && channelsOf('twitch').includes(src)) return;
     const text = modActionText(ev);
     if (text) addSystem('twitch', '🛡 ' + text, false, ch);
   }
@@ -1268,7 +1272,9 @@ function modActionText(ev) {
     deny_unban_request: () => `${by} rechazó la solicitud de desbaneo de ${who}`,
   };
   const key = a.replace('shared_chat_', '');
-  return map[key] ? map[key]() : `${by}: ${a}`;
+  const text = map[key] ? map[key]() : `${by}: ${a}`;
+  // Acción hecha en otro canal del chat compartido, no en este
+  return a.startsWith('shared_chat_') ? `${text} (en ${ev.source_broadcaster_user_name || ev.source_broadcaster_user_login || 'otro canal'} · chat compartido)` : text;
 }
 
 /* ---------- AutoMod: mensajes retenidos para revisión ----------
@@ -1939,7 +1945,8 @@ function openActions(m) {
     note.textContent = `🤝 Mensaje del chat compartido de ${from}. Borrar actúa sobre el mensaje original `
       + `(si eres moderador ahí); timeout y ban se aplican en el canal ${m.channel}.`;
   } else {
-    note.hidden = true;
+    note.hidden = false;
+    note.textContent = `🛡 Las acciones de moderación se aplican solo en ${PLATFORM_NAMES[m.platform]} · ${m.channel}.`;
   }
 
   actions.querySelector('[data-act="reply"]').disabled = !canMod;
