@@ -256,7 +256,17 @@ const publicUrl = (s) => ({
   twitch: `https://www.twitch.tv/${encodeURIComponent(s.ch)}`,
   kick: `https://kick.com/${encodeURIComponent(kickSlugs[s.ch] || s.ch)}`,
   starvios: `https://starvios.com/live/${encodeURIComponent(s.ch)}`,
+  youtube: ytPublicUrl(s.ch),
+  tiktok: `https://www.tiktok.com/@${encodeURIComponent(s.ch)}/live`,
 }[s.p]);
+
+function ytPublicUrl(entry) {
+  const live = typeof ytStreams !== 'undefined' && ytStreams[entry];
+  if (live && live.videoId) return `https://www.youtube.com/watch?v=${live.videoId}`;
+  if (entry.startsWith('v=')) return `https://www.youtube.com/watch?v=${entry.slice(2)}`;
+  if (entry.startsWith('UC')) return `https://www.youtube.com/channel/${entry}/live`;
+  return `https://www.youtube.com/${entry}/live`;
+}
 
 function makeTile(s) {
   const tile = el('div', `pl-tile ${s.p}`);
@@ -291,6 +301,8 @@ function makeTile(s) {
       try {
         if (s.p === 'twitch') await loadTwitch(t, s, seq);
         else if (s.p === 'kick') await loadKick(t, s, seq, ext);
+        else if (s.p === 'youtube') loadYouTubePlayer(t, s, ext);
+        else if (s.p === 'tiktok') t.msg('TikTok no deja ver su directo dentro de otras páginas. Toca ↗ para abrirlo en TikTok.');
         else await loadStarvios(t, s, seq);
         if (seq === t.seq) t.setMuted(PL.audio !== s.key);
       } catch (e) {
@@ -309,6 +321,44 @@ function iframe(src) {
   f.referrerPolicy = 'origin';
   return f;
 }
+
+// YouTube: su reproductor con "enablejsapi" para silenciar y saber si le subieron el volumen
+function loadYouTubePlayer(t, s, ext) {
+  const live = typeof ytStreams !== 'undefined' && ytStreams[s.ch];
+  const videoId = (live && live.videoId) || (s.ch.startsWith('v=') ? s.ch.slice(2) : null);
+  if (!videoId) { t.msg('⚫ Fuera de directo (o aún no se encuentra su directo). Se revisa cada 2 min.'); t.retry = true; return; }
+  ext.href = `https://www.youtube.com/watch?v=${videoId}`;
+  const q = new URLSearchParams({ autoplay: '1', mute: '1', playsinline: '1', enablejsapi: '1', origin: location.origin });
+  const f = iframe(`https://www.youtube.com/embed/${videoId}?${q}`);
+  t.media.replaceChildren(f);
+  t.muted = true;
+  const cmd = (func, args = []) => { try { f.contentWindow.postMessage(JSON.stringify({ event: 'command', func, args }), '*'); } catch { /* aún cargando */ } };
+  t.setMuted = (m) => { t.muted = m; cmd(m ? 'mute' : 'unMute'); if (!m) cmd('playVideo'); };
+  t.getMuted = () => t.muted;
+  t.ytFrame = f;
+  // Pide al reproductor que avise de sus cambios (volumen, silencio)
+  f.addEventListener('load', () => { try { f.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: s.key }), '*'); } catch { /* ignorar */ } t.setMuted(PL.audio !== s.key); });
+}
+
+// Avisos del reproductor de YouTube: si le quitas el silencio desde él, los demás se silencian
+addEventListener('message', (e) => {
+  if (!/^https:\/\/www\.youtube\.com$/.test(e.origin) || typeof e.data !== 'string') return;
+  let d;
+  try { d = JSON.parse(e.data); } catch { return; }
+  if (d.event !== 'infoDelivery' || !d.info || typeof d.info.muted !== 'boolean') return;
+  for (const [k, t] of plTiles) {
+    if (t.ytFrame && t.ytFrame.contentWindow === e.source) {
+      t.muted = d.info.muted;
+      onNativeAudio(k, d.info.muted);
+    }
+  }
+});
+
+// Si un directo de YouTube aún no se encontraba, se vuelve a intentar cuando aparezca
+setInterval(() => {
+  if (!PL.open) return;
+  for (const t of plTiles.values()) if (t.retry && typeof ytStreams !== 'undefined' && ytStreams[t.el.dataset.key.slice(8)]) { t.retry = false; t.load(); }
+}, 15000);
 
 async function loadTwitch(t, s, seq) {
   // Con la API de Twitch se puede silenciar y saber si le subieron el volumen

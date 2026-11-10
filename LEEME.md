@@ -1,6 +1,6 @@
 # Chat M
 
-Centro de mando para tus directos en **Twitch + Kick + Starvios**, pensado para la tablet:
+Centro de mando para tus directos en **Twitch + Kick + Starvios + YouTube + TikTok**, pensado para la tablet:
 chat unificado, moderación, estadísticas en vivo y herramientas del canal.
 
 ## Secciones
@@ -55,8 +55,10 @@ chat queda siempre visible y la sección se abre a su lado.
     **follows** (tu canal y donde eres moderador) y **canjes de puntos** (tu canal),
     que necesitan haber iniciado sesión con Twitch.
   - Starvios: subs, regalos, raids, recompensas, donaciones de Starvies, TTS y confeti.
-  - Kick: su API pública no da eventos (solo los manda a un servidor por webhooks),
-    así que por ahora no aparecen.
+  - Kick: los canjes de tu canal (con tu sesión de Kick). Su API no da los demás eventos
+    sin un servidor.
+  - YouTube: Super Chats, Super Stickers, miembros nuevos, hitos y membresías regaladas.
+  - TikTok: regalos, follows, suscripciones, preguntas (y "me gusta" o entradas si los activas).
 - **🎬 Directo:** cambia título, categoría y tags de tu directo en una plataforma o en
   varias a la vez. Tiene 12 categorías favoritas (búscalas y toca ☆) y las 3 recientes:
   tocar una cambia la categoría al momento. Starvios no permite tags.
@@ -145,6 +147,30 @@ En ⚙ Ajustes → Cuenta de Starvios escribe tu correo y contraseña de Starvio
 **Iniciar sesión**. Solo funciona con cuentas de correo y contraseña (no con
 inicio de sesión de Google u otras redes). Para moderar, tu cuenta debe ser la
 dueña del canal o moderadora.
+
+## 2d. YouTube (leer, escribir y moderar)
+
+En ⚙ Ajustes → Cuentas → YouTube están los pasos (botón "¿Cómo los consigo?"). Resumen:
+
+1. En <https://console.cloud.google.com/> crea un proyecto y activa **YouTube Data API v3**.
+2. Pantalla de consentimiento de OAuth: tipo **Externo**; agrega tu cuenta de YouTube como **usuario de prueba**.
+3. Crea un **ID de cliente de OAuth** (Aplicación web) con el origen `https://luisvz10593.github.io`
+   (y `http://localhost:8090` para la PC). Pégalo en la tablet.
+4. Crea una **clave de API**, restríngela a YouTube Data API v3 y a `https://luisvz10593.github.io/*`. Pégala en la tablet.
+
+- Con la **clave** se lee el chat sin sesión (no caduca). Con la **sesión de Google** se escribe y modera;
+  dura una hora y arriba aparece **▶ Renovar YouTube** para renovarla con un toque.
+- Google da **10 000 unidades al día**: leer gasta 5 por lectura, escribir o borrar 20 y banear 200.
+  En "Normal" (cada ~8 s) alcanza para unas 5 horas de directo al día. Se puede pedir más cuota gratis en Google Cloud.
+- En canales: `@tu_canal` (lo encuentra solo cuando entra en directo) o el enlace de un directo.
+
+## 2e. TikTok LIVE (solo lectura)
+
+TikTok no tiene API para su chat. Chat M lo lee con **Euler Stream**: crea una cuenta gratis en
+<https://www.eulerstream.com/>, copia tu **API Key** y pégala en ⚙ Ajustes → Cuentas → TikTok
+(se guarda solo en la tablet). Plan gratis: 25 conexiones a la vez y 100 directos distintos al día.
+Se ven mensajes, regalos, follows, suscripciones y preguntas. TikTok no deja escribir ni moderar
+desde otras apps, ni ver su directo dentro de otras páginas.
 
 ## 3. Publicarla para la tablet (GitHub Pages, gratis)
 

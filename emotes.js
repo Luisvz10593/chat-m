@@ -44,7 +44,7 @@ function currentTarget() {
 
 function openEmotes() {
   const t = currentTarget();
-  if (emTab !== 'emoji' && (!t || emTab !== t.p)) emTab = 'emoji';
+  if (emTab !== 'emoji' && (!t || emTab !== t.p || !['twitch', 'kick', 'starvios'].includes(t.p))) emTab = 'emoji';
   emPanel.hidden = false;
   $('#emote-search').value = '';
   renderEmoteTabs();
@@ -57,7 +57,8 @@ $('#target').addEventListener('change', () => { if (!emPanel.hidden) openEmotes(
 function renderEmoteTabs() {
   const t = currentTarget();
   const tabs = [['emoji', '😀 Emojis']];
-  if (t) tabs.push([t.p, `${PLATFORM_NAMES[t.p]} · ${t.ch}`]);
+  // YouTube y TikTok: solo emojis normales (sus emotes no se pueden pedir por API)
+  if (t && ['twitch', 'kick', 'starvios'].includes(t.p)) tabs.push([t.p, `${PLATFORM_NAMES[t.p]} · ${t.ch}`]);
   $('#emote-tabs').replaceChildren(...tabs.map(([id, label]) => {
     const b = el('button', 'tl-tab', label);
     b.type = 'button';

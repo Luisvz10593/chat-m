@@ -1,7 +1,7 @@
 // Service worker: permite instalar la app y abrirla aunque falle la red.
 // Usa "red primero" para que siempre cargue la versión más reciente.
-const CACHE = 'chatm-v32';
-const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'nav.js', 'stream.js', 'tools.js', 'emotes.js', 'moderation.js', 'dashboard.js', 'chatplus.js', 'content.js', 'player.js', 'settings.js', 'manifest.webmanifest', 'icon.svg'];
+const CACHE = 'chatm-v33';
+const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'nav.js', 'stream.js', 'tools.js', 'emotes.js', 'moderation.js', 'dashboard.js', 'chatplus.js', 'content.js', 'youtube.js', 'tiktok.js', 'player.js', 'settings.js', 'manifest.webmanifest', 'icon.svg'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'no-cache' })))));

@@ -36,6 +36,7 @@
         <div class="brand">Chat <b>M</b></div>
         <!-- Un botón por canal; se generan desde app.js -->
         <div class="chips" id="chips"></div>
+        <button type="button" class="yt-renew" id="yt-renew" hidden title="La sesión de Google dura una hora">▶ Renovar YouTube</button>
         <button type="button" class="icon-btn" id="btn-player" title="Ver el directo" aria-pressed="false">📺</button>
         <div id="shared-bar" class="shared-bar" hidden></div>
         <div id="pinned-bar" class="pinned-bar" hidden></div>
@@ -244,6 +245,16 @@
             <div class="set-card-head"><span class="plat-dot starvios"></span><b>Starvios</b></div>
             <input name="starviosChannel" placeholder="tu_canal, otro_canal" autocapitalize="off" spellcheck="false" aria-label="Canales de Starvios">
           </div>
+          <div class="set-card">
+            <div class="set-card-head"><span class="plat-dot youtube"></span><b>YouTube</b></div>
+            <input name="youtubeChannel" placeholder="@tu_canal, @otro_canal o el enlace de un directo" autocapitalize="off" spellcheck="false" aria-label="Canales de YouTube">
+            <p class="note">Escribe el @ del canal (lo encuentra solo cuando entra en directo) o pega el enlace de un directo.</p>
+          </div>
+          <div class="set-card">
+            <div class="set-card-head"><span class="plat-dot tiktok"></span><b>TikTok</b></div>
+            <input name="tiktokChannel" placeholder="tu_usuario, otro_usuario" autocapitalize="off" spellcheck="false" aria-label="Usuarios de TikTok">
+            <p class="note">Solo lectura: TikTok no deja escribir ni moderar desde otras apps. Necesita la clave de Euler (⚙ Cuentas).</p>
+          </div>
         </section>
 
         <!-- ===== Cuentas ===== -->
@@ -296,6 +307,58 @@
             </div>
           </div>
 
+          <div class="set-card acct" id="acct-youtube">
+            <div class="set-card-head"><span class="plat-dot youtube"></span><b>YouTube</b><span class="acct-state"></span></div>
+            <span id="youtube-auth-status" class="note" hidden></span>
+            <div class="stack">
+              <label>ID de cliente de Google (para escribir y moderar)
+                <input name="youtubeClientId" placeholder="123…apps.googleusercontent.com" autocapitalize="off" spellcheck="false">
+              </label>
+              <label>Clave de API de Google (para leer el chat; no caduca)
+                <input name="youtubeApiKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="AIza…">
+              </label>
+              <label>Velocidad de lectura del chat
+                <select name="ytPollSpeed">
+                  <option value="rapida">Rápida (≈ 4 s) · gasta más cuota</option>
+                  <option value="normal">Normal (≈ 8 s)</option>
+                  <option value="ahorro">Ahorro (≈ 15 s) · para directos largos</option>
+                </select>
+              </label>
+              <p class="note" id="yt-quota"></p>
+            </div>
+            <div class="row">
+              <button type="button" id="youtube-login" class="primary">Iniciar sesión con Google</button>
+              <button type="button" id="youtube-logout" hidden>Cerrar sesión</button>
+            </div>
+            <details class="set-help">
+              <summary>¿Cómo los consigo? (una sola vez)</summary>
+              <ol>
+                <li>Entra a <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">console.cloud.google.com</a> y crea un proyecto (ej. "Chat M").</li>
+                <li><b>APIs y servicios → Biblioteca</b>: busca <b>YouTube Data API v3</b> y actívala.</li>
+                <li><b>Pantalla de consentimiento de OAuth</b>: tipo <b>Externo</b>, ponle nombre y tu correo; en <b>Usuarios de prueba</b> agrega tu cuenta de Google de YouTube.</li>
+                <li><b>Credenciales → Crear credenciales → ID de cliente de OAuth</b>, tipo <b>Aplicación web</b>. En <b>Orígenes de JavaScript autorizados</b> agrega <code>https://luisvz10593.github.io</code> (y <code>http://localhost:8090</code> si pruebas en la PC). Copia el <b>ID de cliente</b> aquí.</li>
+                <li><b>Credenciales → Crear credenciales → Clave de API</b>. Restríngela a <b>YouTube Data API v3</b> y a sitios web <code>https://luisvz10593.github.io/*</code>. Pégala aquí.</li>
+              </ol>
+              <p class="note">Google da 10 000 unidades gratis al día: leer el chat gasta 5 por lectura (con "Normal" alcanza para unas 5 horas de directo al día), escribir o borrar 20 y banear 200. Si necesitas más, en Google Cloud puedes pedir un aumento de cuota gratis.</p>
+            </details>
+          </div>
+
+          <div class="set-card acct" id="acct-tiktok">
+            <div class="set-card-head"><span class="plat-dot tiktok"></span><b>TikTok</b><span class="acct-state"></span></div>
+            <label>Clave de API de Euler Stream
+              <input name="tiktokApiKey" type="password" autocomplete="off" autocapitalize="off" spellcheck="false">
+            </label>
+            <details class="set-help">
+              <summary>¿Por qué Euler y cómo la consigo?</summary>
+              <p class="note">TikTok no tiene una API para leer el chat de un LIVE. <b>Euler Stream</b> es un servicio que se conecta al directo y manda los mensajes, regalos, follows y "me gusta" a Chat M.</p>
+              <ol>
+                <li>Crea una cuenta gratis en <a href="https://www.eulerstream.com/" target="_blank" rel="noopener">eulerstream.com</a> (plan Community: hasta 25 conexiones a la vez y 100 directos distintos al día).</li>
+                <li>En su panel copia tu <b>API Key</b> y pégala aquí. Se guarda solo en esta tablet.</li>
+              </ol>
+              <p class="note">Con TikTok solo se puede leer: no deja escribir, borrar ni banear desde otras apps.</p>
+            </details>
+          </div>
+
           <p class="note">URL de redirección para tus apps de Twitch y Kick:
             <code id="redirect-url"></code> <button type="button" class="link-btn" id="copy-redirect">Copiar</button></p>
         </section>
@@ -313,9 +376,15 @@
             <label class="toggle set-switch"><span>Mantener la pantalla encendida</span><input type="checkbox" name="wakeLock"></label>
           </div>
           <div class="set-card">
+            <div class="set-card-head"><span class="plat-dot tiktok"></span><b>TikTok</b></div>
+            <label class="toggle set-switch"><span>Mostrar los "me gusta"<small>se juntan por persona cada 20 s</small></span><input type="checkbox" name="tiktokShowLikes"></label>
+            <label class="toggle set-switch"><span>Mostrar quién entra al directo<small>en directos grandes llena el chat</small></span><input type="checkbox" name="tiktokShowJoins"></label>
+          </div>
+          <div class="set-card">
             <div class="set-card-head"><b>Colores del chat</b></div>
             <ul class="legend-list">
-              <li><span class="lg twitch"></span>Twitch <span class="lg kick"></span>Kick <span class="lg starvios"></span>Starvios</li>
+              <li><span class="lg twitch"></span>Twitch <span class="lg kick"></span>Kick <span class="lg starvios"></span>Starvios <span class="lg youtube"></span>YouTube <span class="lg tiktok"></span>TikTok</li>
+              <li><span class="lg redeem"></span>Canje de puntos</li>
               <li><span class="lg mention"></span>Te mencionaron (@tu_nombre)</li>
               <li><span class="lg reply-me"></span>Te respondieron</li>
               <li><span class="lg event"></span>Eventos: subs, raids, bits, donaciones…</li>
@@ -338,6 +407,15 @@
               <button type="button" id="btn-clear">🧹 Limpiar el chat</button>
               <span class="note">Solo borra lo que ves en esta pantalla.</span>
             </div>
+          </div>
+          <div class="set-card">
+            <div class="set-card-head"><b>Diagnóstico</b></div>
+            <p class="note" id="diag-twitch"></p>
+            <div class="row">
+              <button type="button" id="btn-diag-tiktok">TikTok: ver lo que llega</button>
+              <span class="note">Si TikTok no muestra mensajes, copia este texto y mándamelo.</span>
+            </div>
+            <pre class="diag-box" id="diag-tiktok" hidden></pre>
           </div>
           <div class="set-card">
             <div class="set-card-head"><b>Actualizaciones</b></div>
@@ -370,6 +448,8 @@
   <script src="dashboard.js"></script>
   <script src="chatplus.js"></script>
   <script src="content.js"></script>
+  <script src="youtube.js"></script>
+  <script src="tiktok.js"></script>
   <script src="player.js"></script>
   <script src="settings.js"></script>
 </body>

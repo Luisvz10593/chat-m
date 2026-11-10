@@ -6,6 +6,17 @@
 // Al publicar una versión nueva: agrega su entrada arriba (y sube CACHE en sw.js)
 const RELEASES = [
   {
+    v: '3.2', date: '2026-11-09', title: 'YouTube, TikTok y canjes en el chat',
+    items: [
+      '▶ YouTube: lee el chat de tu canal (y otros, o el enlace de un directo); con tu sesión de Google también escribes, borras, das timeout y baneas. Muestra Super Chats, Super Stickers, miembros nuevos y membresías regaladas.',
+      'YouTube gasta cuota de Google (10 000 unidades gratis al día): elige la velocidad de lectura en ⚙ Cuentas y ahí ves cuánto llevas.',
+      '🎵 TikTok LIVE (solo lectura, con una clave gratis de Euler Stream): mensajes, regalos, follows, suscripciones y preguntas; "me gusta" y entradas opcionales en ⚙ Vista.',
+      'El reproductor 📺 también muestra los directos de YouTube; TikTok no deja verse dentro de otras páginas (botón ↗ para abrirlo).',
+      '🏆 Los canjes vuelven a decir quién y qué canjeó: en Starvios con el nombre y costo de la recompensa, en Twitch el mensaje lleva el nombre del canje, y en Kick ahora aparecen (con tu sesión de Kick).',
+      'Twitch: los eventos de tu canal (canjes primero) ya no se quedan fuera cuando moderas muchos canales. En ⚙ Avanzado → Diagnóstico ves cuántos hay.',
+    ],
+  },
+  {
     v: '3.1', date: '2026-10-27', title: 'Moderación más clara entre canales',
     items: [
       'El menú de cada mensaje dice en qué canal se aplican las acciones de moderación (solo en ese).',
@@ -175,7 +186,32 @@ function onSettingsOpen(tab) {
   showSettingsTab(tab || (!sources().length ? 'channels' : unseenReleases() ? 'news' : settingsTab));
   updateFontPreview();
   if (auth) renderColorRow(); // color de tu nombre (chatplus.js)
+  updateDiag();
 }
+
+/* ---------- Diagnóstico (Avanzado) ---------- */
+function updateDiag() {
+  // Eventos de Twitch: cuántas suscripciones hay y el último error
+  const d = $('#diag-twitch');
+  if (d) {
+    d.textContent = !auth ? 'Eventos de Twitch: inicia sesión con Twitch.'
+      : `Eventos de Twitch: ${esSubscribed.size} activos (máx. ~300)`
+        + (esStats.skipped ? ` · ${esStats.skipped} no cupieron (los menos importantes de otros canales)` : '')
+        + (esStats.lastError ? ` · último error: ${esStats.lastError}` : '');
+  }
+  // TikTok: si hay clave
+  const tt = $('#acct-tiktok');
+  if (tt) {
+    const has = !!($('#settings-form').elements.tiktokApiKey.value.trim() || cfg.tiktokApiKey);
+    tt.dataset.state = has ? 'on' : 'off';
+    tt.querySelector('.acct-state').textContent = has ? 'Clave lista' : 'Sin clave';
+  }
+}
+$('#btn-diag-tiktok').addEventListener('click', () => {
+  const box = $('#diag-tiktok');
+  box.hidden = !box.hidden;
+  box.textContent = ttDiag.length ? ttDiag.join('\n') : 'Todavía no ha llegado nada de TikTok. Revisa que el usuario esté en directo y que la clave de Euler sea correcta.';
+});
 
 /* ---------- Vista ---------- */
 function updateFontPreview() {

@@ -21,10 +21,18 @@ const DEFAULTS = {
   twitchChannel: '',
   kickChannel: '',
   starviosChannel: '',
+  youtubeChannel: '',
+  tiktokChannel: '',
   twitchClientId: '',
   kickClientId: '',
   kickClientSecret: '', // solo vive en este dispositivo
   kickChatroomId: '',
+  youtubeClientId: '',  // ID de cliente OAuth de Google (para escribir y moderar)
+  youtubeApiKey: '',    // clave de API de Google (para leer el chat sin sesión); solo en este dispositivo
+  ytPollSpeed: 'normal', // cada cuánto se lee el chat de YouTube (gasta cuota)
+  tiktokApiKey: '',     // clave de Euler Stream para leer TikTok LIVE; solo en este dispositivo
+  tiktokShowLikes: false,
+  tiktokShowJoins: false,
   sendTarget: '',  // "plataforma:canal" donde escribir
   hidden: [],      // canales ocultos, como "plataforma:canal"
   fontSize: 19,
@@ -33,22 +41,37 @@ const DEFAULTS = {
   showModLog: true, // acciones de moderación de otros mods como avisos en el chat
 };
 
-const PLATFORMS = ['twitch', 'kick', 'starvios'];
-const PLATFORM_NAMES = { twitch: 'Twitch', kick: 'Kick', starvios: 'Starvios' };
+const PLATFORMS = ['twitch', 'kick', 'starvios', 'youtube', 'tiktok'];
+const PLATFORM_NAMES = { twitch: 'Twitch', kick: 'Kick', starvios: 'Starvios', youtube: 'YouTube', tiktok: 'TikTok' };
 const cfg = Object.assign({}, DEFAULTS, store.get('cfg', {}));
 
 // Cada plataforma admite varios canales separados por coma o espacio.
-// También acepta el enlace del canal (twitch.tv/x, kick.com/x, starvios.com/live/x).
+// También acepta el enlace del canal (twitch.tv/x, kick.com/x, starvios.com/live/x, tiktok.com/@x).
 function cleanChannel(c) {
   return c
     .replace(/^https?:\/\//, '')
-    .replace(/^(www\.|m\.)?(twitch\.tv|kick\.com|starvios\.com)\/(live\/)?/, '')
+    .replace(/^(www\.|m\.)?(twitch\.tv|kick\.com|starvios\.com|tiktok\.com)\/(live\/)?/, '')
     .split(/[/?#]/)[0]
-    .replace(/^[#@]/, '');
+    .replace(/^[#@]/, '')
+    .toLowerCase();
+}
+/* YouTube: "@canal", el ID del canal (UC…) o el enlace de un directo.
+ * Se guarda como "@canal", "UC…" o "v=ID" (el ID del video distingue mayúsculas). */
+function cleanYouTube(c) {
+  const s = c.trim();
+  const v = /(?:[?&]v=|youtu\.be\/|\/live\/|\/shorts\/|\/embed\/)([\w-]{11})/.exec(s) || /^v=([\w-]{11})$/.exec(s);
+  if (v) return 'v=' + v[1];
+  const id = /(?:\/channel\/)?(UC[\w-]{22})/.exec(s);
+  if (id) return id[1];
+  const h = /(?:youtube\.com\/)?@([\w.-]+)/.exec(s);
+  if (h) return '@' + h[1].toLowerCase();
+  const plain = s.replace(/^https?:\/\/(www\.|m\.)?youtube\.com\//, '').split(/[/?#]/)[0];
+  return plain ? '@' + plain.toLowerCase() : '';
 }
 function channelsOf(p) {
-  return [...new Set(String(cfg[p + 'Channel'] || '').toLowerCase()
-    .split(/[\s,;]+/).map(cleanChannel).filter(Boolean))];
+  const clean = p === 'youtube' ? cleanYouTube : cleanChannel;
+  return [...new Set(String(cfg[p + 'Channel'] || '')
+    .split(/[\s,;]+/).map(clean).filter(Boolean))];
 }
 
 // fetch con límite de tiempo, para que ninguna conexión se quede "cargando" para siempre
@@ -127,6 +150,15 @@ function toast(text, isError = false) {
 const statusMap = {};
 const chipFor = (key) => document.querySelector(`.chip[data-src="${CSS.escape(key)}"]`);
 
+// Nombre bonito de un canal cuando se conoce (p. ej. el título del canal de YouTube)
+const chanLabels = {};
+function setChanLabel(key, label) {
+  if (!label || chanLabels[key] === label) return;
+  chanLabels[key] = label;
+  const chip = chipFor(key);
+  if (chip) chip.querySelector('.label').textContent = label;
+}
+
 function setStatus(key, status, text) {
   statusMap[key] = { status, text };
   const chip = chipFor(key);
@@ -146,7 +178,7 @@ function renderChips() {
     b.title = `${PLATFORM_NAMES[p]} · ${ch} (toca para ocultar o mostrar)`;
     b.setAttribute('aria-pressed', String(!hidden.has(key)));
     b.innerHTML = '<span class="dot"></span><span class="label"></span><span class="state"></span>';
-    b.querySelector('.label').textContent = ch;
+    b.querySelector('.label').textContent = chanLabels[key] || ch;
     b.querySelector('.state').textContent = st.text;
     b.addEventListener('click', () => {
       const set = new Set(cfg.hidden);
@@ -196,9 +228,13 @@ function fmtTime(d) {
 // Tus nombres: los de tus cuentas; si no iniciaste sesión en una plataforma,
 // se usa su primer canal configurado (normalmente el tuyo)
 function myNames() {
-  const logged = { twitch: auth && auth.login, kick: kickAuth && kickAuth.name, starvios: svAuth && svAuth.username };
+  const logged = {
+    twitch: auth && auth.login, kick: kickAuth && kickAuth.name, starvios: svAuth && svAuth.username,
+    youtube: typeof ytAuth !== 'undefined' && ytAuth && ytAuth.name,
+  };
   return PLATFORMS.map((p) => logged[p] || channelsOf(p)[0])
-    .filter(Boolean).map((n) => String(n).toLowerCase());
+    .filter((n) => n && !/^(v=|UC[\w-]{22}$)/.test(n)) // un enlace o ID de YouTube no es un nombre
+    .map((n) => String(n).toLowerCase().replace(/^@/, ''));
 }
 
 // Elemento en pantalla de un mensaje (para saltar al mensaje respondido)
@@ -283,6 +319,15 @@ function addMessage(m) {
     }
   }
 
+  // Canje de puntos con texto: qué recompensa canjeó
+  if (m.reward) {
+    const rw = document.createElement('span');
+    rw.className = 'reward-tag';
+    rw.textContent = '🏆 ' + (m.reward.title || 'Canje');
+    content.append(rw);
+    el.classList.add('redeem');
+  }
+
   const user = document.createElement('span');
   user.className = 'user';
   user.style.color = readableColor(m.color, m.platform);
@@ -335,6 +380,7 @@ function addSystem(platform, text, highlight = false, channel = null) {
   content.append(text);
   el.append(time, content);
   pushEl(el, Date.now());
+  return el;
 }
 
 // Inserta cada mensaje en su lugar según la hora en que se escribió, no según
@@ -367,14 +413,23 @@ function markUserCleared(platform, channel, username) {
 const BADGE_LABELS = {
   broadcaster: 'STREAMER', moderator: 'MOD', vip: 'VIP',
   subscriber: 'SUB', founder: 'SUB', og: 'OG', verified: '✔',
+  member: 'MIEMBRO', // YouTube
 };
+
+// YouTube y TikTok no mandan color de nombre: se elige uno fijo por persona
+const NAME_COLORS = ['#ff7a7a', '#ffb86b', '#ffe066', '#9be36b', '#5ee0c1', '#6bc6ff', '#a99bff', '#f78fd6', '#ff9f43', '#7bed9f'];
+function nameColor(name) {
+  let h = 0;
+  for (const c of String(name || '')) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return NAME_COLORS[h % NAME_COLORS.length];
+}
 // Nombres de insignias de otras plataformas → los de arriba
 const BADGE_ALIASES = { owner: 'broadcaster', mod: 'moderator', sub: 'subscriber' };
 
 // Evita nombres ilegibles sobre fondo oscuro
 function readableColor(color, platform) {
   if (!color || !/^#[0-9a-f]{6}$/i.test(color)) {
-    return { kick: '#53fc18', starvios: '#ff7cbc' }[platform] || '#bf94ff';
+    return { kick: '#53fc18', starvios: '#ff7cbc', youtube: '#ff6b6b', tiktok: '#4ff0ea' }[platform] || '#bf94ff';
   }
   const n = parseInt(color.slice(1), 16);
   const r = n >> 16, g = (n >> 8) & 255, b = n & 255;
@@ -758,7 +813,62 @@ function handleTwitchMsg(tags, prefix, text, channel, viaRoom) {
     replyId: tags['reply-parent-msg-id'] || null,
     sourceId: tags['source-id'] || (viaRoom ? tags.id : null),
     shared: shared ? { roomId: srcRoom, name: twRoomName(srcRoom) } : null,
+    reward: twitchRewardOf(tags, channel, prefix.split('!')[0], text),
   });
+}
+
+/* ---------- Canjes de puntos de Twitch en el chat ----------
+ * Los canjes que piden texto llegan como mensaje con "custom-reward-id"; los
+ * demás solo por EventSub. Se juntan: el mensaje lleva el nombre de la
+ * recompensa y no se repite el aviso.
+ */
+const twRewardTitles = {};      // id de recompensa → título (de tu canal)
+let twRewardsLoaded = 0;
+const twRecentRedeems = [];     // avisos de EventSub recientes: { login, input, el, at }
+
+async function loadTwitchRewardTitles() {
+  if (!auth || Date.now() - twRewardsLoaded < 600000) return;
+  twRewardsLoaded = Date.now();
+  try {
+    const j = await helix('GET', 'channel_points/custom_rewards', { broadcaster_id: auth.userId });
+    for (const r of j.data || []) twRewardTitles[r.id] = r.title;
+  } catch { /* sin permiso: se muestra "Canje" */ }
+}
+
+function twitchRewardOf(tags, channel, login, text) {
+  const special = { 'highlighted-message': 'Resaltar mi mensaje', 'skip-subs-mode-message': 'Escribir en modo solo subs', 'gigantified-emote-message': 'Emote gigante', 'animated-message': 'Mensaje animado' }[tags['msg-id']];
+  const id = tags['custom-reward-id'];
+  if (!id && !special) return null;
+  const now = Date.now();
+  // Si EventSub ya avisó de este canje, se quita ese aviso (este mensaje lo dice todo)
+  const i = twRecentRedeems.findIndex((r) => r.login === login && now - r.at < 60000 && (!r.input || r.input.trim() === text.trim()));
+  let title = special || twRewardTitles[id] || null;
+  if (i >= 0) {
+    title = title || twRecentRedeems[i].title;
+    twRecentRedeems[i].el.remove();
+    twRecentRedeems.splice(i, 1);
+  }
+  if (id && !title && twitchRooms[channel] === (auth && auth.userId)) loadTwitchRewardTitles();
+  return { id, title };
+}
+
+// Aviso de canje de EventSub: si su mensaje ya está en el chat, solo le pone el nombre
+function showTwitchRedeem(ev, ch) {
+  const r = ev.reward || {};
+  if (r.id && r.title) twRewardTitles[r.id] = r.title;
+  const login = ev.user_login;
+  const msgEl = ev.user_input && [...feed.querySelectorAll(`.msg.twitch.redeem[data-src="${CSS.escape(srcKey('twitch', ch))}"]`)].reverse()
+    .find((e) => e._msg && e._msg.login === login && e._msg.reward && e._msg.reward.id === r.id && Date.now() - e._msg.time < 60000);
+  if (msgEl) {
+    const tag = msgEl.querySelector('.reward-tag');
+    if (tag) tag.textContent = `🏆 ${r.title} (${Number(r.cost || 0).toLocaleString('es')} pts)`;
+    return;
+  }
+  const line = addSystem('twitch', `🏆 ${ev.user_name} canjeó "${r.title}" (${Number(r.cost || 0).toLocaleString('es')} pts)${ev.user_input ? ' — ' + ev.user_input : ''}`, true, ch);
+  if (ev.user_input) {
+    twRecentRedeems.push({ login, input: ev.user_input, title: r.title, el: line, at: Date.now() });
+    if (twRecentRedeems.length > 30) twRecentRedeems.shift();
+  }
 }
 
 /* ---------- Respaldos para ver el chat compartido ----------
@@ -1076,6 +1186,8 @@ function closeEventSub() {
   esWs = null;
   esSession = null;
   esSubscribed.clear();
+  esQueue.length = 0;
+  Object.assign(esStats, { ok: 0, fail: 0, skipped: 0, lastError: '' });
 }
 
 // reconnectUrl: Twitch pide mudarse a otra conexión; las suscripciones se conservan
@@ -1111,65 +1223,105 @@ function connectEventSub(reconnectUrl) {
   };
 }
 
-async function subscribeEventSub(ch) {
+/* Suscripciones de EventSub con prioridad.
+ * Twitch permite unas 300 por conexión: con muchos canales de moderación se
+ * llenaba y los canjes de tu canal se quedaban fuera. Ahora tu canal va primero
+ * (canjes antes que nada), los demás canales solo usan el espacio que sobra y
+ * lo menos importante va al final. */
+const ES_MAX = 295;          // margen bajo el límite de Twitch
+const ES_RESERVED_OWN = 30;  // lugares guardados para tu canal
+const esQueue = [];          // [{ prio, own, type, version, condition, key }]
+let esWorking = false;
+const esStats = { ok: 0, fail: 0, skipped: 0, lastError: '', cost: 0, maxCost: 0 };
+
+function subscribeEventSub(ch) {
   const room = twitchRooms[ch];
   if (!esSession || !room || !auth) return;
+  const isOwn = room === auth.userId;
   const asMod = { broadcaster_user_id: room, moderator_user_id: auth.userId };
   const own = { broadcaster_user_id: room };
-  // [tipo, versión, condición, permiso necesario]
+  // [prioridad (menor = antes), tipo, versión, condición, permiso necesario]
   const subs = [
-    ['channel.follow', '2', asMod, 'moderator:read:followers'],
-    // Mensajes que AutoMod retiene para revisión, y cuando alguien los resuelve
-    ['automod.message.hold', '2', asMod, 'moderator:manage:automod'],
-    ['automod.message.update', '2', asMod, 'moderator:manage:automod'],
+    // Mensajes que AutoMod retiene, y cuando alguien los resuelve
+    [2, 'automod.message.hold', '2', asMod, 'moderator:manage:automod'],
+    [2, 'automod.message.update', '2', asMod, 'moderator:manage:automod'],
+    [3, 'channel.follow', '2', asMod, 'moderator:read:followers'],
     // 🛡 Moderación: registro de acciones, sospechosos, desbaneos, escudo, advertencias
-    ['channel.moderate', '2', asMod, 'moderator:read:warnings'],
-    ['channel.suspicious_user.message', '1', asMod, 'moderator:read:suspicious_users'],
-    ['channel.unban_request.create', '1', asMod, 'moderator:manage:unban_requests'],
-    ['channel.unban_request.resolve', '1', asMod, 'moderator:manage:unban_requests'],
-    ['channel.shield_mode.begin', '1', asMod, 'moderator:manage:shield_mode'],
-    ['channel.shield_mode.end', '1', asMod, 'moderator:manage:shield_mode'],
-    ['channel.warning.acknowledge', '1', asMod, 'moderator:read:warnings'],
-    ['channel.shoutout.receive', '1', asMod, 'moderator:manage:shoutouts'],
-    // Chat compartido: empieza, cambia quién participa, termina (no pide permiso)
-    ['channel.shared_chat.begin', '1', own, null],
-    ['channel.shared_chat.update', '1', own, null],
-    ['channel.shared_chat.end', '1', own, null],
+    [3, 'channel.moderate', '2', asMod, 'moderator:read:warnings'],
+    [3, 'channel.unban_request.create', '1', asMod, 'moderator:manage:unban_requests'],
+    [4, 'channel.suspicious_user.message', '1', asMod, 'moderator:read:suspicious_users'],
+    [4, 'channel.unban_request.resolve', '1', asMod, 'moderator:manage:unban_requests'],
+    [5, 'channel.shield_mode.begin', '1', asMod, 'moderator:manage:shield_mode'],
+    [5, 'channel.shield_mode.end', '1', asMod, 'moderator:manage:shield_mode'],
+    [5, 'channel.warning.acknowledge', '1', asMod, 'moderator:read:warnings'],
+    [5, 'channel.shoutout.receive', '1', asMod, 'moderator:manage:shoutouts'],
   ];
-  if (room === auth.userId) {
+  if (isOwn) {
     // Solo del canal propio
     subs.push(
+      [0, 'channel.channel_points_custom_reward_redemption.add', '1', own, 'channel:read:redemptions'],
       // Mensajes de tu chat: de aquí salen los del chat compartido aunque IRC no los mande
-      ['channel.chat.message', '1', { broadcaster_user_id: room, user_id: auth.userId }, 'user:read:chat'],
-      ['channel.channel_points_custom_reward_redemption.add', '1', own, 'channel:read:redemptions'],
-      ['channel.hype_train.begin', '2', own, 'channel:read:hype_train'],
-      ['channel.hype_train.progress', '2', own, 'channel:read:hype_train'],
-      ['channel.hype_train.end', '2', own, 'channel:read:hype_train'],
-      ['channel.goal.begin', '1', own, 'channel:read:goals'],
-      ['channel.goal.progress', '1', own, 'channel:read:goals'],
-      ['channel.goal.end', '1', own, 'channel:read:goals'],
-      ['channel.charity_campaign.donate', '1', own, 'channel:read:charity'],
-      ['channel.ad_break.begin', '1', own, 'channel:read:ads'],
-      ['channel.custom_power_up_redemption.add', '1', own, 'bits:read'],
-      ['channel.poll.begin', '1', own, 'channel:manage:polls'],
-      ['channel.poll.end', '1', own, 'channel:manage:polls'],
-      ['channel.prediction.begin', '1', own, 'channel:manage:predictions'],
-      ['channel.prediction.end', '1', own, 'channel:manage:predictions'],
-      ['stream.online', '1', own, 'channel:read:ads'],
-      ['stream.offline', '1', own, 'channel:read:ads'],
+      [1, 'channel.chat.message', '1', { broadcaster_user_id: room, user_id: auth.userId }, 'user:read:chat'],
+      // Chat compartido: empieza, cambia quién participa, termina (en otros canales se revisa cada minuto)
+      [1, 'channel.shared_chat.begin', '1', own, null],
+      [1, 'channel.shared_chat.update', '1', own, null],
+      [1, 'channel.shared_chat.end', '1', own, null],
+      [1, 'channel.custom_power_up_redemption.add', '1', own, 'bits:read'],
+      [2, 'stream.online', '1', own, 'channel:read:ads'],
+      [2, 'stream.offline', '1', own, 'channel:read:ads'],
+      [2, 'channel.hype_train.begin', '2', own, 'channel:read:hype_train'],
+      [2, 'channel.hype_train.end', '2', own, 'channel:read:hype_train'],
+      [3, 'channel.hype_train.progress', '2', own, 'channel:read:hype_train'],
+      [3, 'channel.goal.begin', '1', own, 'channel:read:goals'],
+      [3, 'channel.goal.progress', '1', own, 'channel:read:goals'],
+      [3, 'channel.goal.end', '1', own, 'channel:read:goals'],
+      [3, 'channel.charity_campaign.donate', '1', own, 'channel:read:charity'],
+      [3, 'channel.ad_break.begin', '1', own, 'channel:read:ads'],
+      [3, 'channel.poll.begin', '1', own, 'channel:manage:polls'],
+      [3, 'channel.poll.end', '1', own, 'channel:manage:polls'],
+      [3, 'channel.prediction.begin', '1', own, 'channel:manage:predictions'],
+      [3, 'channel.prediction.end', '1', own, 'channel:manage:predictions'],
     );
   }
   // Susurros que recibes (una sola vez por sesión, no por canal)
-  subs.push(['user.whisper.message', '1', { user_id: auth.userId }, 'user:read:whispers']);
-  for (const [type, version, condition, scope] of subs) {
+  subs.push([1, 'user.whisper.message', '1', { user_id: auth.userId }, 'user:read:whispers']);
+  for (const [prio, type, version, condition, scope] of subs) {
     const key = type + ':' + (condition.broadcaster_user_id || condition.user_id);
-    if (esSubscribed.has(key) || (scope && !(auth.scopes || []).includes(scope))) continue;
-    esSubscribed.add(key);
-    try {
-      await helix('POST', 'eventsub/subscriptions', null,
-        { type, version, condition, transport: { method: 'websocket', session_id: esSession } });
-    } catch { /* no eres moderador de ese canal: ahí no llegan follows */ }
+    if (esSubscribed.has(key) || esQueue.some((q) => q.key === key)) continue;
+    if (scope && !(auth.scopes || []).includes(scope)) continue;
+    // Los de tu canal siempre antes que los de cualquier otro canal
+    esQueue.push({ prio: isOwn || type === 'user.whisper.message' ? prio : 10 + prio, own: isOwn, type, version, condition, key });
   }
+  esQueue.sort((a, b) => a.prio - b.prio);
+  runEsQueue();
+}
+
+async function runEsQueue() {
+  if (esWorking) return;
+  esWorking = true;
+  const session = esSession;
+  try {
+    while (esQueue.length && esSession === session) {
+      const item = esQueue.shift();
+      const limit = item.own ? ES_MAX : ES_MAX - ES_RESERVED_OWN;
+      if (esSubscribed.size >= limit) { esStats.skipped++; continue; } // ya no cabe: lo menos importante queda fuera
+      esSubscribed.add(item.key);
+      try {
+        const j = await helix('POST', 'eventsub/subscriptions', null,
+          { type: item.type, version: item.version, condition: item.condition, transport: { method: 'websocket', session_id: session } });
+        esStats.ok++;
+        if (j && j.total_cost != null) { esStats.cost = j.total_cost; esStats.maxCost = j.max_total_cost; }
+      } catch (e) {
+        // No eres moderador ahí, falta un permiso o Twitch no aceptó más: libera el lugar
+        esSubscribed.delete(item.key);
+        esStats.fail++;
+        if (item.own || !/forbidden|unauthorized|not.*moderator/i.test(e.message)) esStats.lastError = `${item.type}: ${e.message}`;
+      }
+    }
+  } finally {
+    esWorking = false;
+  }
+  if (esQueue.length && esSession && esSession !== session) runEsQueue();
 }
 
 // Otros módulos (Moderación, Panel) escuchan eventos con onTwitchEvent(fn)
@@ -1216,8 +1368,7 @@ function twitchEventToChat(type, ev, ch) {
   } else if (type === 'automod.message.update') {
     resolveAutomodCard(ev.message_id, ev.status, ev.moderator_user_name);
   } else if (type === 'channel.channel_points_custom_reward_redemption.add') {
-    const r = ev.reward || {};
-    addSystem('twitch', `🏆 ${ev.user_name} canjeó "${r.title}" (${r.cost} puntos)${ev.user_input ? ' — ' + ev.user_input : ''}`, true, ch);
+    showTwitchRedeem(ev, ch);
   } else if (type === 'channel.suspicious_user.message') {
     const why = (ev.types || []).includes('ban_evader') || ev.ban_evasion_evaluation === 'likely' ? 'posible evasión de ban'
       : (ev.shared_ban_channel_ids || []).length ? 'baneado en otros canales' : 'usuario vigilado';
@@ -1648,6 +1799,40 @@ async function kickBan(slug, userId, minutes) {
   await kickApi('POST', 'moderation/bans', body);
 }
 
+/* ---------- Canjes de Kick en el chat ----------
+ * Kick no manda los canjes al chat público: se revisan cada 10 s con tu
+ * sesión (permiso "Read channel rewards") y se avisan los nuevos.
+ */
+const kickRedeemSeen = new Set();
+const kickRedeemSince = Date.now() - 60000; // no repite los de antes de abrir la app
+async function pollKickRedeems() {
+  if (!kickAuth || (kickAuth.scope && !kickAuth.scope.includes('channel:rewards:read'))) return;
+  const norm = (s) => String(s || '').toLowerCase().replace(/[-_]/g, '');
+  const ch = channelsOf('kick').find((c) => norm(c) === norm(kickAuth.name));
+  if (!ch || cfg.hidden.includes(srcKey('kick', ch))) return;
+  try {
+    const found = [];
+    for (const status of ['pending', 'accepted']) {
+      const j = await kickApi('GET', 'channels/rewards/redemptions?status=' + status);
+      for (const g of j.data || []) {
+        for (const x of g.redemptions || []) {
+          if (kickRedeemSeen.has(x.id)) continue;
+          kickRedeemSeen.add(x.id);
+          const at = Date.parse(x.redeemed_at) || Date.now();
+          if (at < kickRedeemSince) continue;
+          found.push({ userId: x.redeemer && x.redeemer.user_id, input: x.user_input, at, title: (g.reward && g.reward.title) || 'una recompensa', cost: g.reward && g.reward.cost });
+        }
+      }
+    }
+    if (!found.length) return;
+    if (typeof kickNames === 'function') await kickNames(found); // nombres (tools.js)
+    for (const x of found.sort((a, b) => a.at - b.at)) {
+      addSystem('kick', `🏆 ${x.user || 'Alguien'} canjeó "${x.title}"${x.cost ? ` (${Number(x.cost).toLocaleString('es')} pts)` : ''}${x.input ? ' — ' + x.input : ''}`, true, ch);
+    }
+  } catch { /* sin permiso o sin conexión: se intenta de nuevo */ }
+}
+setInterval(pollKickRedeems, 10000);
+
 /* =========================================================
    STARVIOS — lectura por su API pública (Supabase)
    Starvios no tiene API documentada: estos son los mismos
@@ -1739,6 +1924,25 @@ async function svCheckDeleted(name, gen) {
   rows.forEach((r) => markDeleted('starvios', r.id));
 }
 
+// Texto de un evento de Starvios (canjes, subs, raids…) con lo que trae en "meta"
+function starviosEventText(d, user, body) {
+  const meta = d.meta || {};
+  const nf = (n) => Number(n || 0).toLocaleString('es');
+  switch (d.kind) {
+    case 'reward': {
+      // Canje: quién, qué recompensa, cuántos puntos y el texto que escribió
+      const title = meta.reward_title || 'una recompensa';
+      const input = meta.has_input && body && body !== title ? ` — "${body}"` : '';
+      return `🏆 ${user} canjeó ${meta.emoji ? meta.emoji + ' ' : ''}${title}${meta.cost ? ` (${nf(meta.cost)} pts)` : ''}${input}`;
+    }
+    case 'sub': return `⭐ ${body || user + ' se suscribió'}`;
+    case 'gift_sub': return `🎁 ${body || user + ' regaló suscripciones'}`;
+    case 'raid': return `🚀 Raid de ${user}${meta.viewers ? ` con ${nf(meta.viewers)} espectadores` : ''}`;
+    case 'starfall': return `🌠 ${user}: ${body || 'lluvia de estrellas'}${meta.points ? ` (${nf(meta.points)} puntos)` : ''}`;
+    default: return `${user} ${SV_EVENTS[d.kind]}${body ? ' — ' + body : ''}`;
+  }
+}
+
 function handleStarviosMsg(d, channel) {
   if (!d || !d.id) return;
   const s = svStreams[channel];
@@ -1752,7 +1956,7 @@ function handleStarviosMsg(d, channel) {
   const body = d.body || '';
 
   if (d.kind && d.kind !== 'chat' && SV_EVENTS[d.kind]) {
-    addSystem('starvios', `${user} ${SV_EVENTS[d.kind]}${body ? ' — ' + body : ''}`, true, channel);
+    addSystem('starvios', starviosEventText(d, user, body), true, channel);
     return;
   }
 
@@ -1917,6 +2121,17 @@ const PROVIDERS = {
     ban: (m, minutes) => starviosBan(m.channel, m.userId, minutes),
     pin: (m) => svAuthed('POST', 'rpc/pin_chat_message', { _id: m.id, _minutes: 30 }),
   },
+  // YouTube y TikTok viven en youtube.js y tiktok.js (se cargan después)
+  youtube: {
+    logged: () => typeof ytLogged === 'function' && ytLogged(),
+    send: (ch, text) => ytSend(ch, text),
+    del: (m) => ytDelete(m),
+    ban: (m, minutes) => ytBan(m, minutes),
+  },
+  tiktok: {
+    logged: () => false, // TikTok no deja escribir ni moderar desde otras apps
+    send: () => { throw new Error('TikTok no permite escribir desde otras apps.'); },
+  },
 };
 
 /* =========================================================
@@ -1936,7 +2151,10 @@ function openActions(m) {
 
   const canMod = PROVIDERS[m.platform].logged();
   const note = $('#act-note');
-  if (!canMod) {
+  if (m.platform === 'tiktok') {
+    note.hidden = false;
+    note.textContent = 'TikTok no permite responder ni moderar desde otras apps: hazlo desde la app de TikTok. Aquí solo se lee su chat.';
+  } else if (!canMod) {
     note.hidden = false;
     note.textContent = `Inicia sesión con ${PLATFORM_NAMES[m.platform]} en ⚙ Ajustes para responder y moderar.`;
   } else if (m.shared) {
@@ -1967,6 +2185,17 @@ actions.addEventListener('click', async (e) => {
   if (act === 'close') { actions.close(); return; }
   if (act === 'mention') {
     actions.close();
+    const input = $('#input');
+    input.value = `@${m.user} ` + input.value;
+    input.focus();
+    return;
+  }
+  if (act === 'reply' && m.platform === 'youtube') {
+    // YouTube no tiene respuestas: se escribe en su canal mencionándolo
+    actions.close();
+    $('#target').value = srcKey(m.platform, m.channel);
+    cfg.sendTarget = $('#target').value;
+    updateComposer();
     const input = $('#input');
     input.value = `@${m.user} ` + input.value;
     input.focus();
@@ -2187,6 +2416,8 @@ settings.addEventListener('close', () => {
   if (before.twitchChannel !== cfg.twitchChannel) { connectTwitch(); connectEventSub(); }
   if (['kickChannel', 'kickChatroomId'].some((k) => before[k] !== cfg[k])) connectKick();
   if (before.starviosChannel !== cfg.starviosChannel) connectStarvios();
+  if (['youtubeChannel', 'youtubeApiKey'].some((k) => before[k] !== cfg[k])) connectYouTube();
+  if (['tiktokChannel', 'tiktokApiKey'].some((k) => before[k] !== cfg[k])) connectTikTok();
   if (before.twitchClientId !== cfg.twitchClientId && auth) twitchLogout();
   if (before.kickClientId !== cfg.kickClientId && kickAuth) kickLogout();
 });
@@ -2255,7 +2486,7 @@ async function init() {
   updateWakeLock();
 
   if (!sources().length) {
-    addSystem('twitch', '¡Bienvenido a Chat M! Toca ⚙ para poner tus canales de Twitch, Kick y Starvios.', true);
+    addSystem('twitch', '¡Bienvenido a Chat M! Toca ⚙ para poner tus canales de Twitch, Kick, Starvios, YouTube y TikTok.', true);
   }
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {

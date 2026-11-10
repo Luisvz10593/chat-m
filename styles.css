@@ -13,6 +13,8 @@
   --twitch: #9146ff;
   --kick: #53fc18;
   --starvios: #ff4fa3;
+  --youtube: #ff2d2d;
+  --tiktok: #25f4ee;
   --danger: #f43f5e;
   --mention: rgba(251, 191, 36, .13);
   --radius: 16px;
@@ -1019,3 +1021,43 @@ html, body { overflow: hidden; overscroll-behavior: none; max-width: 100%; }
 .shared-chip { cursor: pointer; }
 .shared-chip::after { content: ' ▶'; font-size: 10px; opacity: .7; }
 @media (max-width: 500px) { .pl-size { width: 30px; } .pl-bar { gap: 6px; } }
+
+/* Canje de puntos dentro de un mensaje */
+.msg .reward-tag {
+  display: inline-block; margin-right: 6px; padding: 1px 8px; border-radius: 999px; vertical-align: .1em;
+  font-size: .7em; font-weight: 800; background: linear-gradient(90deg, #f59e0b, #f97316); color: #1a0f00;
+}
+.msg.redeem { background: linear-gradient(90deg, rgba(245, 158, 11, .12), transparent 70%); }
+
+/* ---------- YouTube y TikTok ---------- */
+.msg.youtube { border-left-color: var(--youtube); }
+.msg.tiktok { border-left-color: var(--tiktok); }
+.chip.youtube[aria-pressed="true"] { border-color: var(--youtube); }
+.chip.tiktok[aria-pressed="true"] { border-color: var(--tiktok); }
+.chip[data-status="off"] .dot { background: #6b7280; }
+.plat-dot.youtube { background: var(--youtube); } .plat-dot.tiktok { background: var(--tiktok); }
+.badge-platform.youtube { background: var(--youtube); color: #fff; }
+.badge-platform.tiktok { background: var(--tiktok); color: #000; }
+.pick.youtube { border-color: var(--youtube); } .pick.tiktok { border-color: var(--tiktok); }
+.tl-live-card.youtube { border-left-color: var(--youtube); } .tl-live-card.tiktok { border-left-color: var(--tiktok); }
+.rw-req.youtube { border-left-color: var(--youtube); } .rw-req.tiktok { border-left-color: var(--tiktok); }
+.lg.youtube { border-color: var(--youtube); } .lg.tiktok { border-color: var(--tiktok); }
+.lg.redeem { background: linear-gradient(90deg, rgba(245, 158, 11, .5), transparent); }
+.pill.member { background: #0f9d58; }
+/* Botón para renovar la sesión de Google (dura una hora) */
+.yt-renew {
+  flex: none; min-height: 40px; padding: 0 14px; border-radius: 999px; border: 0; font-weight: 800;
+  background: var(--youtube); color: #fff; animation: pulse 2s infinite;
+}
+.yt-renew[hidden] { display: none; }
+.set-help summary { font-weight: 700; color: var(--text); }
+.set-help ol { margin: 8px 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; line-height: 1.45; }
+.set-help a { color: #a5b4fc; }
+.set-card select {
+  min-height: 46px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit;
+}
+.diag-box {
+  margin: 0; max-height: 220px; overflow: auto; padding: 10px; border-radius: 10px; background: var(--bg);
+  font-size: 12px; white-space: pre-wrap; -webkit-user-select: text; user-select: text;
+}
+.diag-box[hidden] { display: none; }
