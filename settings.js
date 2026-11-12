@@ -3,28 +3,26 @@
    Usa funciones de app.js ($, store, toast, sources…).
    ========================================================= */
 
-// Al publicar una versión nueva: agrega su entrada arriba (y sube CACHE en sw.js)
+// Notas de versión: UNA versión por día. Si hay más cambios el mismo día, se
+// agregan a la versión de ese día (la de arriba) en vez de crear otra; el ⚙
+// vuelve a avisar porque cuenta cuántas novedades has visto de ese día.
+// Un día nuevo = versión nueva arriba con el número siguiente (y subir CACHE en sw.js).
 const RELEASES = [
   {
-    v: '3.4', date: '2026-11-12', title: 'El chat ya no se borra solo',
+    v: '9', date: '2026-11-12', title: 'Kick completo y el chat ya no se borra',
     items: [
       'Antes solo se guardaban los últimos 400 mensajes y en chats rápidos los viejos desaparecían. Ahora por defecto no se borra nada.',
       'Nuevo en ⚙ Vista → 🧹 Borrar mensajes viejos: Nunca, 15 min, 1 hora, 3 horas o Personalizado (los minutos que quieras).',
-      'Si estás leyendo mensajes de arriba, el chat ya no brinca cuando se quitan los viejos.',
-      'Solo si el chat llega a 10 000 mensajes se quitan los más viejos, para que la tablet no se ponga lenta.',
-    ],
-  },
-  {
-    v: '3.3', date: '2026-11-12', title: 'Kick: canjes, KICKs y subs regaladas',
-    items: [
+      'Si estás leyendo mensajes de arriba, el chat ya no brinca cuando se quitan los viejos. Solo si llega a 10 000 mensajes se quitan los más viejos, para que la tablet no se ponga lenta.',
       '🏆 Canjes de Kick: ahora revisa todas las páginas de la lista de Kick (antes podía quedarse viendo solo los viejos).',
       '💚 Donaciones de KICKs: avisa en el chat quién dio KICKs y cuántos (se revisa cada 15 s con tu sesión de Kick).',
       '🎁 Subs regaladas en Kick: avisa quién regaló y cuántas (cada 30 s, en todos tus canales de Kick).',
       'En ⚙ Avanzado → Diagnóstico se ve si cada revisión de Kick está funcionando o qué permiso falta.',
+      '📝 Novedades: ahora hay una versión por día; los cambios del mismo día se juntan en una sola.',
     ],
   },
   {
-    v: '3.2', date: '2026-11-09', title: 'YouTube, TikTok y canjes en el chat',
+    v: '8', date: '2026-11-09', title: 'YouTube, TikTok y canjes en el chat',
     items: [
       '▶ YouTube: lee el chat de tu canal (y otros, o el enlace de un directo); con tu sesión de Google también escribes, borras, das timeout y baneas. Muestra Super Chats, Super Stickers, miembros nuevos y membresías regaladas.',
       'YouTube gasta cuota de Google (10 000 unidades gratis al día): elige la velocidad de lectura en ⚙ Cuentas y ahí ves cuánto llevas.',
@@ -35,32 +33,19 @@ const RELEASES = [
     ],
   },
   {
-    v: '3.1', date: '2026-10-27', title: 'Moderación más clara entre canales',
+    v: '7', date: '2026-10-27', title: 'Ver directos desde el chat y moderación más clara',
     items: [
+      '📺 Botón arriba del chat para ver el directo de tus canales (Twitch, Kick y Starvios) y de los del chat compartido; tocar un canal en la barra 🤝 lo abre.',
+      'Hasta 4 directos al mismo tiempo: toca los canales de arriba para agregarlos o quitarlos; se acomodan solos para verse lo más grande posible.',
+      'Solo uno suena: el botón 🔊 de cada video le da el sonido y silencia a los demás (en Twitch y Starvios también si le subes desde su reproductor). El que suena tiene borde verde.',
+      'Empieza sin sonido para que no se oiga tu propio directo con eco.',
+      'Selector de tamaño (chico, mediano, grande) y una barrita debajo para arrastrar la altura (doble toque = mediano).',
       'El menú de cada mensaje dice en qué canal se aplican las acciones de moderación (solo en ese).',
-      'Chat compartido de Twitch: los bans y timeouts hechos en otro canal ya no aparecen repetidos en cada uno de tus canales; si vienen de un canal que no tienes en Chat M, dice "(en canal · chat compartido)".',
+      'Chat compartido de Twitch: los bans y timeouts hechos en otro canal ya no aparecen repetidos en cada uno de tus canales.',
     ],
   },
   {
-    v: '3.0', date: '2026-10-27', title: 'Varios directos a la vez',
-    items: [
-      '📺 Hasta 4 directos al mismo tiempo: toca los canales de arriba para agregarlos o quitarlos; se acomodan solos para verse lo más grande posible.',
-      'Solo uno suena: el botón 🔊 de cada video le da el sonido y silencia a los demás. En Twitch y Starvios también funciona si le subes el volumen desde su reproductor.',
-      'El que tiene sonido se marca con borde verde.',
-      'Nuevo selector de tamaño (chico, mediano, grande) y una barrita debajo para arrastrar y ajustar la altura a tu gusto (doble toque = mediano).',
-    ],
-  },
-  {
-    v: '2.9', date: '2026-10-27', title: 'Ver el directo desde el chat',
-    items: [
-      'Botón 📺 arriba del chat: muestra el directo de cualquiera de tus canales visibles, de Twitch, Kick o Starvios.',
-      'También los canales del chat compartido; tocar un canal en la barra 🤝 abre su directo.',
-      'Empieza sin sonido para que no se oiga tu propio directo con eco; súbele desde el reproductor.',
-      'Tres tamaños, botón para abrirlo en su página y recuerda el último canal que viste.',
-    ],
-  },
-  {
-    v: '2.8', date: '2026-10-23', title: 'Chat compartido de Twitch, ahora sí',
+    v: '6', date: '2026-10-23', title: 'Chat compartido de Twitch, ahora sí',
     items: [
       'Al detectar un chat compartido, Chat M entra también al chat de los otros canales y muestra sus mensajes en el tuyo (con su color y etiqueta 🤝), sin repetirlos.',
       'Con tu sesión de Twitch también los recibe por EventSub, que dice de qué canal viene cada mensaje.',
@@ -70,114 +55,51 @@ const RELEASES = [
     ],
   },
   {
-    v: '2.7', date: '2026-10-22', title: 'Canjes renovados y arreglos del Panel',
-    items: [
-      '🏆 Canjes con dos vistas: 📥 Solicitudes y 🏆 Recompensas, de todos tus canales juntos (🌐 Todos) o de uno solo.',
-      'Solicitudes filtradas por estado (por revisar, completados, devueltos), con botones para completar o devolver puntos de una o de todas.',
-      'Editor completo de recompensas: nombre, costo, descripción, color, pedir texto, pausar, completar automáticamente, límites y tiempos de espera.',
-      'Se quitó "Canjear como espectador" de Starvios.',
-      'Panel: arreglado el error "started_at" del ranking de bits en tu canal.',
-      'Las filas de canales y pestañas ya no regresan al inicio al elegir una opción.',
-      'Las tarjetas del Panel se acomodan sin espacios vacíos.',
-    ],
-  },
-  {
-    v: '2.6', date: '2026-10-22', title: 'Ajustes ordenados y Novedades',
-    items: [
-      'Ajustes en pestañas: Canales, Cuentas, Vista, Avanzado y Novedades.',
-      'Cada cuenta muestra si está conectada o si le falta algún permiso.',
-      'Vista previa del tamaño de letra y guía de colores del chat.',
-      'Botón para buscar actualizaciones de la app.',
-      'Esta sección de Novedades: el ⚙ avisa cuando hay una versión nueva.',
-    ],
-  },
-  {
-    v: '2.5', date: '2026-10-22', title: 'Respuestas, menciones y chat compartido',
+    v: '5', date: '2026-10-22', title: 'Respuestas, Ajustes nuevos y canjes renovados',
     items: [
       'Las respuestas muestran el mensaje original; tócalo para saltar a él.',
       'Fondo amarillo cuando te mencionan y azul cuando te responden.',
       'Chat compartido de Twitch: barra con los canales participantes, avisos al empezar, entrar, salir y terminar, y un color por canal.',
+      'Ajustes en pestañas: Canales, Cuentas, Vista, Avanzado y Novedades; cada cuenta muestra si está conectada o le falta algún permiso.',
+      'Vista previa del tamaño de letra, guía de colores del chat y botón para buscar actualizaciones.',
+      'Esta sección de Novedades: el ⚙ avisa cuando hay una versión nueva.',
+      '🏆 Canjes con dos vistas: 📥 Solicitudes y 🏆 Recompensas, de todos tus canales juntos o de uno solo; completar o devolver puntos de una o de todas.',
+      'Editor completo de recompensas: nombre, costo, descripción, color, pedir texto, pausar, completar automáticamente, límites y tiempos de espera.',
+      'Panel: arreglado el error "started_at" del ranking de bits; las tarjetas se acomodan sin espacios vacíos.',
+      'Las filas de canales y pestañas ya no regresan al inicio al elegir una opción.',
     ],
   },
   {
-    v: '2.4', date: '2026-10-18', title: 'Arreglos de diseño',
+    v: '4', date: '2026-10-18', title: 'Rediseño: Moderar, Panel y Contenido',
     items: [
-      'Ya no se tapan los canales, selectores ni el panel de emojis.',
-      'En el celular la vista ya no se encoge ni deja un espacio negro.',
-      'Botones más fáciles de tocar en pantallas táctiles.',
-    ],
-  },
-  {
-    v: '2.3', date: '2026-10-18', title: 'Contenido y mejoras del chat',
-    items: [
-      '🎞 Contenido: clips, VODs, marcadores, calendario y canales en vivo; en Starvios también comandos, emotes, mensajes privados, notificaciones, alertas de OBS y ajustes del directo.',
-      'Insignias reales de Twitch e imágenes animadas de bits.',
-      'Barra del mensaje fijado, susurros y color de tu nombre.',
-    ],
-  },
-  {
-    v: '2.2', date: '2026-10-18', title: 'Moderar y Panel',
-    items: [
-      '🛡 Moderar: desbaneos, sospechosos, baneados, quién está en el chat, mods y VIPs, términos bloqueados, AutoMod, registro y modo escudo.',
-      'Tarjeta de usuario desde cualquier mensaje.',
+      'Menú de secciones a un lado (abajo en el celular); en pantallas anchas el chat queda visible junto a la sección abierta.',
+      '🛡 Moderar: desbaneos, sospechosos, baneados, quién está en el chat, mods y VIPs, términos bloqueados, AutoMod, registro y modo escudo. Tarjeta de usuario desde cualquier mensaje.',
       '📊 Panel en vivo: espectadores, seguidores, subs, metas, Hype Train y rankings.',
+      '🎞 Contenido: clips, VODs, marcadores, calendario y canales en vivo; en Starvios también comandos, emotes, mensajes privados, notificaciones, alertas de OBS y ajustes del directo.',
+      'Insignias reales de Twitch, imágenes animadas de bits, barra del mensaje fijado, susurros y color de tu nombre.',
+      'Arreglos de diseño: ya no se tapan canales, selectores ni emojis; en el celular la vista ya no se encoge; botones más fáciles de tocar.',
     ],
   },
   {
-    v: '2.0', date: '2026-10-18', title: 'Rediseño',
-    items: [
-      'Menú de secciones a un lado (abajo en el celular).',
-      'En pantallas anchas el chat queda visible junto a la sección abierta.',
-    ],
-  },
-  {
-    v: '1.6', date: '2026-10-16', title: 'Emojis y emotes',
-    items: [
-      'Selector de emojis y emotes de cada plataforma.',
-      'Canjear recompensas como espectador en Starvios.',
-      'El teclado ya no se abre solo al poner emojis.',
-    ],
-  },
-  {
-    v: '1.5', date: '2026-10-16', title: 'AutoMod y canjes',
+    v: '3', date: '2026-10-16', title: 'AutoMod, canjes y emojis',
     items: [
       'Los mensajes retenidos por AutoMod aparecen con Permitir / Rechazar.',
       'Canjes pendientes, completar, devolver puntos y gestionar recompensas.',
+      'Selector de emojis y emotes de cada plataforma; el teclado ya no se abre solo al poner emojis.',
     ],
   },
   {
-    v: '1.4', date: '2026-10-14', title: 'Herramientas',
+    v: '2', date: '2026-10-14', title: 'Varios canales, eventos, Directo y Herramientas',
     items: [
-      '🧰 Encuestas, predicciones, anuncios, marcadores, publicidad, modos del chat, raid, shoutout y clips.',
-      'Primer soporte del chat compartido de Twitch.',
-    ],
-  },
-  {
-    v: '1.3', date: '2026-10-14', title: 'Directo',
-    items: [
-      '🎬 Cambia título, categoría y tags en una o varias plataformas a la vez.',
-      '12 categorías favoritas y 3 recientes.',
-      'Tags de Starvios y tarjeta de Kick con su estado actual.',
-    ],
-  },
-  {
-    v: '1.2', date: '2026-10-14', title: 'Eventos y enviar a todos',
-    items: [
+      'Varios canales por plataforma con una sola cuenta; conexión de Kick más estable; la app busca sola la versión más reciente.',
       'Eventos: subs, raids, regalos, bits, follows, canjes y donaciones.',
-      'Enviar el mismo mensaje a todos los canales visibles.',
-      'Mensajes ordenados por hora y Starvios en rosa.',
+      'Enviar el mismo mensaje a todos los canales visibles; mensajes ordenados por hora y Starvios en rosa.',
+      '🎬 Directo: cambia título, categoría y tags en una o varias plataformas a la vez; 12 categorías favoritas y 3 recientes.',
+      '🧰 Herramientas: encuestas, predicciones, anuncios, marcadores, publicidad, modos del chat, raid, shoutout y clips.',
     ],
   },
   {
-    v: '1.1', date: '2026-10-14', title: 'Varios canales',
-    items: [
-      'Varios canales por plataforma con una sola cuenta.',
-      'Conexión de Kick más estable.',
-      'La app busca sola la versión más reciente.',
-    ],
-  },
-  {
-    v: '1.0', date: '2026-10-13', title: 'Primera versión',
+    v: '1', date: '2026-10-13', title: 'Primera versión',
     items: [
       'Chat de Twitch, Kick y Starvios en una sola lista.',
       'Responder, borrar, timeout y ban en las tres plataformas.',
@@ -278,30 +200,33 @@ $('#btn-update').addEventListener('click', async (e) => {
   try {
     const reg = 'serviceWorker' in navigator && await navigator.serviceWorker.getRegistration();
     if (reg) await reg.update();
-    // Compara la versión publicada con la que está abierta
-    const src = await fetch('settings.js', { cache: 'no-store' }).then((r) => r.text());
-    const m = src.match(/v: '([\d.]+)'/);
-    if (m && m[1] !== APP_VERSION) {
-      note.textContent = `Hay una versión nueva (${m[1]}). Recargando…`;
+    // Cada publicación cambia el nombre de la caché en sw.js (aunque sea el mismo día):
+    // si la publicada no es una de las que ya tiene este dispositivo, hay algo nuevo
+    const src = await fetch('sw.js', { cache: 'no-store' }).then((r) => r.text());
+    const m = src.match(/CACHE = '([^']+)'/);
+    const have = 'caches' in window ? await caches.keys() : [];
+    if (m && have.length && !have.includes(m[1])) {
+      note.textContent = 'Hay una actualización. Recargando…';
       setTimeout(() => location.reload(), 800);
-    } else note.textContent = `Ya tienes la última versión (${APP_VERSION}).`;
+    } else note.textContent = `Ya tienes la última versión (v${APP_VERSION}).`;
   } catch {
     note.textContent = 'Sin conexión; inténtalo más tarde.';
   } finally { e.target.disabled = false; }
 });
 
 /* ---------- 📝 Novedades ---------- */
-const SEEN_KEY = 'seenVersion';
-const verNum = (v) => v.split('.').map(Number).reduce((a, n) => a * 1000 + n, 0);
+// Lo visto se guarda como { date: día de la última versión vista, count: cuántas novedades tenía }
+const SEEN_KEY = 'newsSeen';
+const latestSeen = () => ({ date: RELEASES[0].date, count: RELEASES[0].items.length });
+const isUnseen = (r, seen) => !!seen && (r.date > seen.date || (r.date === seen.date && r.items.length > seen.count));
 
 function unseenReleases() {
   const seen = store.get(SEEN_KEY, null);
-  if (!seen) return 0;
-  return RELEASES.filter((r) => verNum(r.v) > verNum(seen)).length;
+  return RELEASES.filter((r) => isUnseen(r, seen)).length;
 }
 
 function markNewsSeen() {
-  store.set(SEEN_KEY, APP_VERSION);
+  store.set(SEEN_KEY, latestSeen());
   updateNewsBadge();
 }
 
@@ -332,7 +257,7 @@ function renderReleaseNotes() {
     const title = document.createElement('b');
     title.textContent = r.title;
     head.append(ver, title);
-    if (seen && verNum(r.v) > verNum(seen)) {
+    if (isUnseen(r, seen)) {
       const nw = document.createElement('span');
       nw.className = 'rn-new';
       nw.textContent = 'NUEVO';
@@ -354,10 +279,16 @@ function renderReleaseNotes() {
 }
 
 $('#app-version').textContent = 'v' + APP_VERSION;
-// Instalación nueva: no hay novedades que avisar
-if (!store.get(SEEN_KEY, null) && !sources().length) store.set(SEEN_KEY, APP_VERSION);
-// Quien ya usaba la app antes de esta sección ve las novedades de esta versión
-if (!store.get(SEEN_KEY, null)) store.set(SEEN_KEY, RELEASES[1].v);
+$('#app-version').title = fmtReleaseDate(RELEASES[0].date);
+if (!store.get(SEEN_KEY, null)) {
+  // Antes se guardaba el número de versión viejo (1.0 … 3.4): se pasa a su día
+  const old = store.get('seenVersion', null);
+  const oldDays = { '3.4': '2026-11-12', '3.3': '2026-11-12', '3.2': '2026-11-09', '3.1': '2026-10-27', '3.0': '2026-10-27', '2.9': '2026-10-27', '2.8': '2026-10-23' };
+  if (old === '3.4') store.set(SEEN_KEY, latestSeen());                              // ya había visto todo
+  else if (old) store.set(SEEN_KEY, { date: oldDays[old] || '2026-10-22', count: 0 }); // ve lo de ese día en adelante
+  else if (!sources().length) store.set(SEEN_KEY, latestSeen());                     // instalación nueva: nada que avisar
+  else store.set(SEEN_KEY, { date: RELEASES[1].date, count: 0 });
+}
 renderReleaseNotes();
 updateNewsBadge();
 if (unseenReleases()) toast(`Chat M se actualizó a la v${APP_VERSION}. Mira las novedades en ⚙ Ajustes.`);
