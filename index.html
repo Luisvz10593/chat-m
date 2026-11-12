@@ -376,6 +376,21 @@
             <label class="toggle set-switch"><span>Mantener la pantalla encendida</span><input type="checkbox" name="wakeLock"></label>
           </div>
           <div class="set-card">
+            <div class="set-card-head"><b>🧹 Borrar mensajes viejos</b></div>
+            <input type="hidden" name="chatClearMode">
+            <div class="seg-choice" id="clear-choice" role="radiogroup" aria-label="Borrar mensajes viejos">
+              <button type="button" data-v="off">Nunca</button>
+              <button type="button" data-v="15">15 min</button>
+              <button type="button" data-v="60">1 hora</button>
+              <button type="button" data-v="180">3 horas</button>
+              <button type="button" data-v="custom">Personalizado</button>
+            </div>
+            <label class="clear-custom" id="clear-custom" hidden>Borrar los mensajes con más de
+              <span class="row"><input type="number" name="chatClearCustom" min="1" max="1440" inputmode="numeric"> minutos</span>
+            </label>
+            <p class="note" id="clear-note"></p>
+          </div>
+          <div class="set-card">
             <div class="set-card-head"><span class="plat-dot tiktok"></span><b>TikTok</b></div>
             <label class="toggle set-switch"><span>Mostrar los "me gusta"<small>se juntan por persona cada 20 s</small></span><input type="checkbox" name="tiktokShowLikes"></label>
             <label class="toggle set-switch"><span>Mostrar quién entra al directo<small>en directos grandes llena el chat</small></span><input type="checkbox" name="tiktokShowJoins"></label>

@@ -39,6 +39,8 @@ const DEFAULTS = {
   showTime: true,
   wakeLock: true,
   showModLog: true, // acciones de moderación de otros mods como avisos en el chat
+  chatClearMode: 'off', // borrar mensajes viejos: 'off' (nunca), '15', '60', '180' (minutos) o 'custom'
+  chatClearCustom: 30,  // minutos cuando es 'custom'
 };
 
 const PLATFORMS = ['twitch', 'kick', 'starvios', 'youtube', 'tiktok'];
@@ -133,7 +135,39 @@ const TWITCH_SCOPES = [
 ].join(' ');
 const twitchMissingScopes = () => !!auth && TWITCH_SCOPES.split(' ').some((s) => !(auth.scopes || []).includes(s));
 
-const MAX_MESSAGES = 400;
+// Por defecto el chat no se borra; solo si llega a este número se quitan los más
+// viejos para que la tablet no se ponga lenta. Borrar por tiempo se elige en ⚙ Vista.
+const MAX_MESSAGES = 10000;
+const CLEAR_PRESETS = { 15: '15 min', 60: '1 hora', 180: '3 horas' };
+
+// Quita mensajes desde el principio mientras shouldRemove(el) diga que sobran,
+// sin mover lo que estás leyendo. Los de AutoMod sin revisar se quedan.
+function trimFeed(shouldRemove) {
+  let removed = 0;
+  let el = feed.firstElementChild;
+  while (el && shouldRemove(el)) {
+    const next = el.nextElementSibling;
+    const pendingAutomod = el.classList.contains('automod') && !el.classList.contains('resolved');
+    if (!pendingAutomod || feed.childElementCount > MAX_MESSAGES) {
+      removed += el.offsetHeight;
+      el.remove();
+    }
+    el = next;
+  }
+  if (removed && !stickToBottom) feed.scrollTop = Math.max(0, feed.scrollTop - removed);
+}
+
+// Minutos tras los que se borran los mensajes (0 = nunca)
+function clearAfterMinutes() {
+  if (cfg.chatClearMode === 'custom') return Math.max(1, Number(cfg.chatClearCustom) || 0);
+  return Number(cfg.chatClearMode) || 0;
+}
+setInterval(() => {
+  const min = clearAfterMinutes();
+  if (!min) return;
+  const limit = Date.now() - min * 60000;
+  trimFeed((el) => (el._t || 0) < limit);
+}, 30000);
 
 // ---------- Utilidades de interfaz ----------
 let toastTimer;
@@ -391,7 +425,7 @@ function pushEl(el, t) {
   while (after && after._t > t) after = after.previousElementSibling;
   if (after) after.after(el);
   else feed.prepend(el);
-  while (feed.childElementCount > MAX_MESSAGES) feed.firstElementChild.remove();
+  if (feed.childElementCount > MAX_MESSAGES) trimFeed(() => feed.childElementCount > MAX_MESSAGES);
   if (stickToBottom) feed.scrollTop = feed.scrollHeight;
   else $('#jump').hidden = false;
 }

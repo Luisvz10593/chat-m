@@ -6,6 +6,15 @@
 // Al publicar una versión nueva: agrega su entrada arriba (y sube CACHE en sw.js)
 const RELEASES = [
   {
+    v: '3.4', date: '2026-11-12', title: 'El chat ya no se borra solo',
+    items: [
+      'Antes solo se guardaban los últimos 400 mensajes y en chats rápidos los viejos desaparecían. Ahora por defecto no se borra nada.',
+      'Nuevo en ⚙ Vista → 🧹 Borrar mensajes viejos: Nunca, 15 min, 1 hora, 3 horas o Personalizado (los minutos que quieras).',
+      'Si estás leyendo mensajes de arriba, el chat ya no brinca cuando se quitan los viejos.',
+      'Solo si el chat llega a 10 000 mensajes se quitan los más viejos, para que la tablet no se ponga lenta.',
+    ],
+  },
+  {
     v: '3.3', date: '2026-11-12', title: 'Kick: canjes, KICKs y subs regaladas',
     items: [
       '🏆 Canjes de Kick: ahora revisa todas las páginas de la lista de Kick (antes podía quedarse viendo solo los viejos).',
@@ -195,6 +204,7 @@ function onSettingsOpen(tab) {
   showSettingsTab(tab || (!sources().length ? 'channels' : unseenReleases() ? 'news' : settingsTab));
   updateFontPreview();
   if (auth) renderColorRow(); // color de tu nombre (chatplus.js)
+  renderClearChoice();
   updateDiag();
 }
 
@@ -228,6 +238,23 @@ $('#btn-diag-tiktok').addEventListener('click', () => {
   box.hidden = !box.hidden;
   box.textContent = ttDiag.length ? ttDiag.join('\n') : 'Todavía no ha llegado nada de TikTok. Revisa que el usuario esté en directo y que la clave de Euler sea correcta.';
 });
+
+/* ---------- Borrar mensajes viejos (Vista) ---------- */
+function renderClearChoice() {
+  const form = $('#settings-form');
+  const mode = form.elements.chatClearMode.value || 'off';
+  for (const b of document.querySelectorAll('#clear-choice button')) b.setAttribute('aria-checked', String(b.dataset.v === mode));
+  $('#clear-custom').hidden = mode !== 'custom';
+  const mins = mode === 'custom' ? Number(form.elements.chatClearCustom.value) || 0 : Number(mode) || 0;
+  $('#clear-note').textContent = mode === 'off'
+    ? 'Los mensajes se quedan todo el directo. (Solo si el chat llega a 10 000 se quitan los más viejos, para que la tablet no se ponga lenta.)'
+    : `Cada medio minuto se quitan los mensajes con más de ${mins >= 60 && mins % 60 === 0 ? mins / 60 + (mins === 60 ? ' hora' : ' horas') : mins + ' min'}.`;
+}
+for (const b of document.querySelectorAll('#clear-choice button')) {
+  b.setAttribute('role', 'radio');
+  b.addEventListener('click', () => { $('#settings-form').elements.chatClearMode.value = b.dataset.v; renderClearChoice(); });
+}
+$('#settings-form').elements.chatClearCustom.addEventListener('input', renderClearChoice);
 
 /* ---------- Vista ---------- */
 function updateFontPreview() {

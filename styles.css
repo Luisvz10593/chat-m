@@ -1061,3 +1061,14 @@ html, body { overflow: hidden; overscroll-behavior: none; max-width: 100%; }
   font-size: 12px; white-space: pre-wrap; -webkit-user-select: text; user-select: text;
 }
 .diag-box[hidden] { display: none; }
+
+/* Opciones en botones (Borrar mensajes viejos) */
+.seg-choice { display: flex; flex-wrap: wrap; gap: 6px; }
+.seg-choice button {
+  flex: 1 1 auto; min-height: 44px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--muted); font-weight: 700;
+}
+.seg-choice button[aria-checked="true"] { background: linear-gradient(135deg, var(--accent), var(--accent-2)); border-color: transparent; color: #fff; }
+.clear-custom .row { gap: 8px; }
+.clear-custom input { width: 110px; }
+.clear-custom[hidden] { display: none !important; }
