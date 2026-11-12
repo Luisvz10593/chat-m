@@ -1799,39 +1799,141 @@ async function kickBan(slug, userId, minutes) {
   await kickApi('POST', 'moderation/bans', body);
 }
 
-/* ---------- Canjes de Kick en el chat ----------
- * Kick no manda los canjes al chat público: se revisan cada 10 s con tu
- * sesión (permiso "Read channel rewards") y se avisan los nuevos.
+/* ---------- Canjes, KICKs y subs regaladas de Kick en el chat ----------
+ * El chat público de Kick (el que lee Chat M) solo trae mensajes y respuestas,
+ * y su conexión en tiempo real solo acepta a kick.com. Así que con tu sesión:
+ * - Canjes: se revisa la lista oficial de canjes (todas sus páginas).
+ * - KICKs: no hay lista de regalos; se compara el ranking semanal de KICKs y,
+ *   si alguien sube, se avisa cuánto dio. (Solo ve a los 100 primeros de la semana.)
+ * - Subs regaladas: igual, con el ranking público de regalos (cualquier canal).
  */
+const kickDiag = { redeems: '', kicks: '', gifts: '' }; // ⚙ Avanzado → Diagnóstico
 const kickRedeemSeen = new Set();
 const kickRedeemSince = Date.now() - 60000; // no repite los de antes de abrir la app
-async function pollKickRedeems() {
-  if (!kickAuth || (kickAuth.scope && !kickAuth.scope.includes('channel:rewards:read'))) return;
+const kickRedeemCursor = {};                // estado → página donde iba (por si Kick lista del más viejo al más nuevo)
+let kickRedeemReady = false;
+const kickHasScope = (s) => !kickAuth.scope || kickAuth.scope.includes(s);
+const kickTime = () => new Date().toLocaleTimeString('es');
+
+// Tu canal de Kick entre los que tienes puestos (por nombre o por ID del dueño)
+async function kickOwnChannel() {
+  if (!kickAuth) return null;
   const norm = (s) => String(s || '').toLowerCase().replace(/[-_]/g, '');
-  const ch = channelsOf('kick').find((c) => norm(c) === norm(kickAuth.name));
-  if (!ch || cfg.hidden.includes(srcKey('kick', ch))) return;
+  const byName = channelsOf('kick').find((c) => norm(c) === norm(kickAuth.name));
+  if (byName) return byName;
+  for (const c of channelsOf('kick')) {
+    try { if (String(await kickBroadcasterId(c)) === String(kickAuth.userId)) return c; } catch { /* sigue */ }
+  }
+  return null;
+}
+
+async function kickRedeemPages(status, fromCursor, maxPages) {
+  const items = [];
+  let cursor = fromCursor || null;
+  let last = fromCursor || null;
+  for (let i = 0; i < maxPages; i++) {
+    const j = await kickApi('GET', 'channels/rewards/redemptions?status=' + status + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''));
+    for (const g of j.data || []) for (const x of g.redemptions || []) items.push({ x, reward: g.reward || {} });
+    const next = j.pagination && j.pagination.next_cursor;
+    if (!next || next === cursor) break;
+    last = cursor = next;
+  }
+  return { items, last };
+}
+
+async function pollKickRedeems() {
+  if (!kickAuth || !kickHasScope('channel:rewards:read')) { kickDiag.redeems = kickAuth ? 'falta el permiso "Read channel rewards": vuelve a iniciar sesión en Kick' : ''; return; }
+  const ch = await kickOwnChannel();
+  if (!ch) { kickDiag.redeems = `tu canal de Kick (${kickAuth.name}) no está en ⚙ Canales`; return; }
+  if (cfg.hidden.includes(srcKey('kick', ch))) return;
   try {
     const found = [];
+    let total = 0;
     for (const status of ['pending', 'accepted']) {
-      const j = await kickApi('GET', 'channels/rewards/redemptions?status=' + status);
-      for (const g of j.data || []) {
-        for (const x of g.redemptions || []) {
+      // La primera vez recorre todas las páginas; después, la primera y desde donde se quedó
+      const pages = !kickRedeemReady
+        ? [await kickRedeemPages(status, null, 20)]
+        : [await kickRedeemPages(status, null, 1), await kickRedeemPages(status, kickRedeemCursor[status], 5)];
+      for (const p of pages) {
+        if (p.last) kickRedeemCursor[status] = p.last;
+        for (const { x, reward } of p.items) {
+          total++;
           if (kickRedeemSeen.has(x.id)) continue;
           kickRedeemSeen.add(x.id);
           const at = Date.parse(x.redeemed_at) || Date.now();
           if (at < kickRedeemSince) continue;
-          found.push({ userId: x.redeemer && x.redeemer.user_id, input: x.user_input, at, title: (g.reward && g.reward.title) || 'una recompensa', cost: g.reward && g.reward.cost });
+          found.push({ userId: x.redeemer && x.redeemer.user_id, input: x.user_input, at, title: reward.title || 'una recompensa', cost: reward.cost });
         }
       }
     }
+    kickRedeemReady = true;
+    kickDiag.redeems = `${kickTime()} · revisados ${total} canjes · ${found.length} nuevos`;
     if (!found.length) return;
     if (typeof kickNames === 'function') await kickNames(found); // nombres (tools.js)
     for (const x of found.sort((a, b) => a.at - b.at)) {
       addSystem('kick', `🏆 ${x.user || 'Alguien'} canjeó "${x.title}"${x.cost ? ` (${Number(x.cost).toLocaleString('es')} pts)` : ''}${x.input ? ' — ' + x.input : ''}`, true, ch);
     }
-  } catch { /* sin permiso o sin conexión: se intenta de nuevo */ }
+  } catch (e) {
+    kickDiag.redeems = `${kickTime()} · error: ${e.message}`;
+  }
 }
-setInterval(pollKickRedeems, 10000);
+setInterval(pollKickRedeems, 12000);
+
+// KICKs: ranking semanal de tu canal; si alguien sube, dio la diferencia
+let kickKicksBase = null; // user_id → { amount, username }
+async function pollKickKicks() {
+  if (!kickAuth || !kickHasScope('kicks:read')) { kickDiag.kicks = kickAuth ? 'falta el permiso "Read KICKs": vuelve a iniciar sesión en Kick' : ''; return; }
+  const ch = await kickOwnChannel();
+  if (!ch) return;
+  try {
+    const j = await kickApi('GET', 'kicks/leaderboard?top=100');
+    const week = (j.data && j.data.week) || [];
+    const now = new Map(week.map((r) => [String(r.user_id), { amount: Number(r.gifted_amount) || 0, username: r.username }]));
+    const sumNow = week.reduce((a, r) => a + (Number(r.gifted_amount) || 0), 0);
+    const sumBase = kickKicksBase ? [...kickKicksBase.values()].reduce((a, r) => a + r.amount, 0) : 0;
+    // Primera vez o empezó otra semana (el total bajó): solo se guarda como base
+    if (kickKicksBase && sumNow >= sumBase && !cfg.hidden.includes(srcKey('kick', ch))) {
+      for (const [id, r] of now) {
+        const before = kickKicksBase.has(id) ? kickKicksBase.get(id).amount : 0;
+        if (r.amount > before) addSystem('kick', `💚 ${r.username} dio ${(r.amount - before).toLocaleString('es')} KICKs`, true, ch);
+      }
+    }
+    kickKicksBase = now;
+    kickDiag.kicks = `${kickTime()} · ${week.length} personas en el ranking de la semana`;
+  } catch (e) {
+    kickDiag.kicks = `${kickTime()} · error: ${e.message}`;
+  }
+}
+setInterval(pollKickKicks, 15000);
+
+// Subs regaladas: ranking público de regalos de cada canal de Kick (no necesita sesión)
+const kickGiftBase = {}; // canal → Map(usuario → cantidad)
+async function pollKickGifts() {
+  const lines = [];
+  for (const ch of channelsOf('kick')) {
+    if (cfg.hidden.includes(srcKey('kick', ch))) continue;
+    try {
+      const j = await kickPublic(ch, '/leaderboards');
+      const list = j.gifts_week || j.gifts || [];
+      const now = new Map(list.map((r) => [r.username, Number(r.quantity) || 0]));
+      const base = kickGiftBase[ch];
+      const sum = (m) => [...m.values()].reduce((a, b) => a + b, 0);
+      if (base && sum(now) >= sum(base)) {
+        for (const [u, q] of now) {
+          const before = base.get(u) || 0;
+          if (q > before) addSystem('kick', `🎁 ${u} regaló ${q - before} sub${q - before > 1 ? 's' : ''}`, true, ch);
+        }
+      }
+      kickGiftBase[ch] = now;
+      lines.push(`${ch}: ok`);
+    } catch (e) {
+      lines.push(`${ch}: ${e.message}`);
+    }
+  }
+  kickDiag.gifts = lines.length ? `${kickTime()} · ${lines.join(', ')}` : '';
+}
+setInterval(pollKickGifts, 30000);
+setTimeout(() => { pollKickRedeems(); pollKickKicks(); pollKickGifts(); }, 4000);
 
 /* =========================================================
    STARVIOS — lectura por su API pública (Supabase)

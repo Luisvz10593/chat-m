@@ -6,6 +6,15 @@
 // Al publicar una versión nueva: agrega su entrada arriba (y sube CACHE en sw.js)
 const RELEASES = [
   {
+    v: '3.3', date: '2026-11-12', title: 'Kick: canjes, KICKs y subs regaladas',
+    items: [
+      '🏆 Canjes de Kick: ahora revisa todas las páginas de la lista de Kick (antes podía quedarse viendo solo los viejos).',
+      '💚 Donaciones de KICKs: avisa en el chat quién dio KICKs y cuántos (se revisa cada 15 s con tu sesión de Kick).',
+      '🎁 Subs regaladas en Kick: avisa quién regaló y cuántas (cada 30 s, en todos tus canales de Kick).',
+      'En ⚙ Avanzado → Diagnóstico se ve si cada revisión de Kick está funcionando o qué permiso falta.',
+    ],
+  },
+  {
     v: '3.2', date: '2026-11-09', title: 'YouTube, TikTok y canjes en el chat',
     items: [
       '▶ YouTube: lee el chat de tu canal (y otros, o el enlace de un directo); con tu sesión de Google también escribes, borras, das timeout y baneas. Muestra Super Chats, Super Stickers, miembros nuevos y membresías regaladas.',
@@ -198,6 +207,13 @@ function updateDiag() {
       : `Eventos de Twitch: ${esSubscribed.size} activos (máx. ~300)`
         + (esStats.skipped ? ` · ${esStats.skipped} no cupieron (los menos importantes de otros canales)` : '')
         + (esStats.lastError ? ` · último error: ${esStats.lastError}` : '');
+  }
+  // Kick: canjes, KICKs y subs regaladas (revisiones periódicas)
+  const k = $('#diag-kick');
+  if (k) {
+    k.textContent = !kickAuth ? 'Kick: inicia sesión con Kick para ver canjes y KICKs.'
+      : `Kick · canjes: ${kickDiag.redeems || 'esperando…'} · KICKs: ${kickDiag.kicks || 'esperando…'}`
+        + (kickDiag.gifts ? ` · subs regaladas: ${kickDiag.gifts}` : '');
   }
   // TikTok: si hay clave
   const tt = $('#acct-tiktok');
